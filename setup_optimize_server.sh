@@ -14,7 +14,7 @@ fi
 SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
-GITHUB_URL="https://raw.githubusercontent.com/cristau/server-optimization-scripts/main/setup_optimize_server.sh"
+GITHUB_URL="https://raw.githubusercontent.com/cristau/server-optimization-scripts/refs/heads/main/setup_optimize_server.sh"
 
 # 检查脚本是否存在
 check_script_exists() {
@@ -309,6 +309,7 @@ view_log() {
   if [ -f "$LOG_FILE" ]; then
     tail -f "$LOG_FILE"
     echo "按 Ctrl+C 退出查看日志。"
+    read -p "按 Enter 键继续..."
   else
     echo "日志文件 $LOG_FILE 不存在。"
   fi
