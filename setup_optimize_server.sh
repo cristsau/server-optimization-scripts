@@ -14,6 +14,7 @@ fi
 SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
+GITHUB_URL="https://raw.githubusercontent.com/cristau/server-optimization-scripts/main/setup_optimize_server.sh"
 
 # 检查脚本是否存在
 check_script_exists() {
@@ -37,14 +38,28 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
 }
 
+# 显示彩色字标题
+show_title() {
+  echo -e "\e[34m░██  ░██\e[0m"
+  echo -e "\e[34m░██  ░██\e[0m       \e[34m░████\e[0m        \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█░█░█\e[0m"
+  echo -e "\e[34m░██  ░██\e[0m     \e[34m░█      █\e[0m      \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█    ░█\e[0m"
+  echo -e "\e[34m░██████\e[0m     \e[34m░██████\e[0m         \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█    ░█\e[0m"
+  echo -e "\e[34m░██  ░██\e[0m     \e[34m░█\e[0m             \e[34m░█\e[0m \e[34m░█\e[0m      \e[34m░█\e[0m  \e[34m░█\e[0m     \e[34m░█░█░█\e[0m"
+  echo -e "\e[34m░██  ░██\e[0m      \e[34m░██  █\e[0m         \e[34m░█\e[0m         \e[34m░█\e[0m                    "
+  echo -e "\e[32mcristsau 万能清理工具\e[0m"
+  echo ""
+}
+
 # 显示菜单
 show_menu() {
   echo "请选择一个选项:"
   echo "1. 安装脚本"
   echo "2. 查看日志 (tail -f /var/log/optimize_server.log)"
   echo "3. 手动更新系统和软件包"
-  echo "4. 卸载脚本"
-  echo "5. 退出"
+  echo "4. 查看当前脚本运行情况"
+  echo "5. 更新当前脚本"
+  echo "6. 卸载脚本"
+  echo "7. 退出"
 }
 
 # 安装脚本
@@ -293,6 +308,7 @@ EOF
 view_log() {
   if [ -f "$LOG_FILE" ]; then
     tail -f "$LOG_FILE"
+    echo "按 Ctrl+C 退出查看日志。"
   else
     echo "日志文件 $LOG_FILE 不存在。"
   fi
@@ -309,6 +325,119 @@ manual_update() {
     echo "脚本 $SCRIPT_PATH 未安装。"
     log "错误: 脚本 $SCRIPT_PATH 未安装，无法手动更新系统和软件包。"
   fi
+}
+
+# 查看当前脚本运行情况
+view_script_status() {
+  if check_script_exists; then
+    echo "脚本 $SCRIPT_PATH 已安装。"
+  else
+    echo "脚本 $SCRIPT_PATH 未安装。"
+    return
+  fi
+
+  # 获取 cron 作业
+  cron_job=$(crontab -l 2>/dev/null | grep "$SCRIPT_PATH")
+  if [ -n "$cron_job" ]; then
+    # 解析 cron 表达式
+    cron_minute=$(echo "$cron_job" | awk '{print $1}')
+    cron_hour=$(echo "$cron_job" | awk '{print $2}')
+    cron_day_of_week=$(echo "$cron_job" | awk '{print $5}')
+    cron_command=$(echo "$cron_job" | awk '{$1=$2=$3=$4=$5=""; print substr($0, 6)}')
+
+    # 将星期几转换为中文
+    case "$cron_day_of_week" in
+      0) day_of_week="星期日" ;;
+      1) day_of_week="星期一" ;;
+      2) day_of_week="星期二" ;;
+      3) day_of_week="星期三" ;;
+      4) day_of_week="星期四" ;;
+      5) day_of_week="星期五" ;;
+      6) day_of_week="星期六" ;;
+      *) day_of_week="未知" ;;
+    esac
+
+    echo "计划任务: $cron_job"
+    echo "计划任务执行时间: 每周 $day_of_week 的 $cron_hour:$cron_minute"
+  else
+    echo "未找到计划任务。"
+  fi
+
+  # 获取上一次执行的日期和时间
+  if [ -f "$LOG_FILE" ]; then
+    last_run=$(grep "优化和清理完成" "$LOG_FILE" | tail -n 1 | awk '{print $1" "$2}')
+    echo "上一次执行日期和时间: $last_run"
+  else
+    echo "日志文件 $LOG_FILE 不存在，无法获取上一次执行信息。"
+  fi
+
+  # 获取上一次执行的结果
+  if [ -f "$LOG_FILE" ]; then
+    last_result=$(grep "优化和清理完成" "$LOG_FILE" | tail -n 1)
+    if [ -n "$last_result" ]; then
+      echo "上一次执行结果: 成功"
+    else
+      echo "上一次执行结果: 失败"
+    fi
+  else
+    echo "日志文件 $LOG_FILE 不存在，无法获取上一次执行结果。"
+  fi
+
+  # 计算下一次执行时间
+  current_time=$(date +%s)
+  cron_time=$(date -d "$(date +%Y-%m-%d) $cron_hour:$cron_minute:00" +%s)
+  while [ "$cron_time" -le "$current_time" ]; do
+    cron_time=$(date -d "+1 week" +%Y-%m-%d)T$cron_hour:$cron_minute:00
+    cron_time=$(date -d "$cron_time" +%s)
+  done
+  next_run=$(date -d "@$cron_time" +"%Y-%m-%d %H:%M:%S")
+  next_run_day=$(date -d "@$cron_time" +"%u")
+  next_run_time=$(date -d "@$cron_time" +"%H:%M")
+
+  # 将星期几转换为中文
+  case "$next_run_day" in
+    0) next_run_day="星期日" ;;
+    1) next_run_day="星期一" ;;
+    2) next_run_day="星期二" ;;
+    3) next_run_day="星期三" ;;
+    4) next_run_day="星期四" ;;
+    5) next_run_day="星期五" ;;
+    6) next_run_day="星期六" ;;
+    *) next_run_day="未知" ;;
+  esac
+
+  echo "下一次执行日期和时间: $next_run_day 的 $next_run_time"
+}
+
+# 更新当前脚本
+update_script() {
+  log "开始更新脚本..."
+  
+  # 下载最新的脚本到临时文件
+  temp_script="/tmp/setup_optimize_server.sh"
+  wget -O "$temp_script" "$GITHUB_URL"
+  if [ $? -ne 0 ]; then
+    log "脚本更新失败。"
+    echo "脚本更新失败，请检查网络连接和文件路径。"
+    return
+  fi
+
+  # 比较当前脚本和临时脚本的哈希值
+  current_hash=$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')
+  new_hash=$(sha256sum "$temp_script" | awk '{print $1}')
+
+  if [ "$current_hash" == "$new_hash" ]; then
+    echo "当前版本已最新，无需更新。"
+    log "当前版本已最新，无需更新。"
+    rm -f "$temp_script"
+    return
+  fi
+
+  # 替换当前脚本
+  mv "$temp_script" "$SCRIPT_PATH"
+  chmod +x "$SCRIPT_PATH"
+  log "脚本已成功更新。"
+  echo "脚本已成功更新。"
 }
 
 # 卸载脚本
@@ -335,8 +464,9 @@ uninstall_script() {
 # 主循环
 while true; do
   clear
+  show_title
   show_menu
-  read -p "请输入选项 (1-5): " choice
+  read -p "请输入选项 (1-7): " choice
   case $choice in
     1)
       install_script
@@ -348,9 +478,15 @@ while true; do
       manual_update
       ;;
     4)
-      uninstall_script
+      view_script_status
       ;;
     5)
+      update_script
+      ;;
+    6)
+      uninstall_script
+      ;;
+    7)
       echo "退出脚本。"
       exit 0
       ;;
