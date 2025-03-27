@@ -1,356 +1,493 @@
 #!/bin/bash
 
 # 脚本名称：setup_optimize_server.sh
-# 描述：用于安装、查看日志和卸载 optimize_server.sh 脚本，并支持自安装快捷命令
-# 使用方法：sudo ./setup_optimize_server.sh
+# 作者：cristsau
+# 版本：3.4
+# 功能：服务器优化管理工具
 
-# 确保以 root 权限运行
 if [ "$(id -u)" -ne 0 ]; then
-  echo "请以 root 权限运行此脚本。"
+  echo -e "\033[31m✗ 请使用 root 权限运行此脚本\033[0m"
   exit 1
 fi
 
-# 定义常量
 SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
-REPO_OWNER="cristsau"
-REPO_NAME="server-optimization-scripts"
-BRANCH="main"
-SCRIPT_FILE="setup_optimize_server.sh"
-GITHUB_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$BRANCH/$SCRIPT_FILE"
+TEMP_LOG="/tmp/optimize_temp.log"
 
-# 检查脚本是否存在
-check_script_exists() {
-  if [ -f "$SCRIPT_PATH" ]; then
-    return 0
-  else
-    return 1
-  fi
-}
-
-# 记录日志
 log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
-}
-
-# 自安装功能：将脚本复制到 /usr/local/bin 并创建快捷命令 cristsau
-self_install() {
-  # 检查是否已经安装
-  if [ -f "/usr/local/bin/cristsau" ]; then
-    echo "快捷命令 'cristsau' 已存在，无需重新安装。"
-    return
+  local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+  echo "$timestamp - $1" | tee -a "$LOG_FILE"
+  if [ -z "$INSTALL_MODE" ]; then
+    echo "$timestamp - 调试：日志写入到 $LOG_FILE" | tee -a "$LOG_FILE"
   fi
-
-  # 复制脚本到 /usr/local/bin
-  echo "正在将脚本安装为快捷命令 'cristsau'..."
-  cp "$0" /usr/local/bin/cristsau
-  chmod +x /usr/local/bin/cristsau
-
-  # 验证安装是否成功
-  if [ -f "/usr/local/bin/cristsau" ]; then
-    echo "快捷命令 'cristsau' 安装成功！现在你可以直接运行 'cristsau' 启动脚本。"
-    log "快捷命令 'cristsau' 安装成功。"
-  else
-    echo "快捷命令安装失败，请检查权限或路径。"
-    log "错误: 快捷命令安装失败。"
-  fi
-}
-
-# 显示彩色字标题
-show_title() {
-  echo -e "\e[34m░██  ░██\e[0m"
-  echo -e "\e[34m░██  ░██\e[0m       \e[34m░████\e[0m        \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█░█░█\e[0m"
-  echo -e "\e[34m░██  ░██\e[0m     \e[34m░█      █\e[0m      \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█    ░█\e[0m"
-  echo -e "\e[34m░██████\e[0m     \e[34m░██████\e[0m         \e[34m░█\e[0m         \e[34m░█\e[0m        \e[34m░█    ░█\e[0m"
-  echo -e "\e[34m░██  ░██\e[0m     \e[34m░█\e[0m             \e[34m░█\e[0m \e[34m░█\e[0m      \e[34m░█\e[0m  \e[34m░█\e[0m     \e[34m░█░█░█\e[0m"
-  echo -e "\e[34m░██  ░██\e[0m      \e[34m░██  █\e[0m         \e[34m░█\e[0m         \e[34m░█\e[0m                    "
-  echo -e "\e[32mcristsau 万能清理工具\e[0m"
-  echo ""
-}
-
-# 显示菜单
-show_menu() {
-  echo "请选择一个选项:"
-  echo "1. 安装脚本"
-  echo "2. 查看日志 (tail -f /var/log/optimize_server.log)"
-  echo "3. 手动更新系统和软件包"
-  echo "4. 查看当前脚本运行情况"
-  echo "5. 更新当前脚本"
-  echo "6. 卸载脚本"
-  echo "7. 安装快捷命令 'cristsau'"
-  echo "8. 退出"
-}
-
-# 安装脚本
-install_script() {
-  log "开始安装优化脚本..."
-
-  # 提示用户输入自动运行的时间
-  read -p "请输入脚本每周自动运行的星期几 (0-6, 其中 0 表示星期日): " day_of_week
-  read -p "请输入脚本自动运行的小时 (0-23): " hour_of_day
-
-  # 验证输入
-  if ! [[ "$day_of_week" =~ ^[0-6]$ ]] || ! [[ "$hour_of_day" =~ ^[0-9]{1,2}$ ]]; then
-    echo "输入无效，请重新运行脚本并输入有效的星期几和小时。"
-    log "错误: 输入无效的自动运行时间。"
+  sync
+  if [ $? -ne 0 ]; then
+    echo "错误：无法写入日志到 $LOG_FILE，请检查权限或磁盘空间" >&2
     exit 1
   fi
+}
 
-  # 创建脚本文件
+convert_weekday() {
+  case $1 in
+    0) echo "日" ;;
+    1) echo "一" ;;
+    2) echo "二" ;;
+    3) echo "三" ;;
+    4) echo "四" ;;
+    5) echo "五" ;;
+    6) echo "六" ;;
+    *) echo "未知" ;;
+  esac
+}
+
+manage_cron() {
+  crontab -l | grep -v "$SCRIPT_PATH" | crontab -
+  if [ $# -eq 2 ]; then
+    cron_min="0"
+    cron_hr="$1"
+    cron_day="$2"
+    (crontab -l 2>/dev/null; echo "$cron_min $cron_hr * * $cron_day $SCRIPT_PATH") | crontab -
+    log "已设置计划任务：每周 $cron_day 的 $cron_hr:00"
+  fi
+}
+
+install_script() {
+  echo -e "\033[36m▶ 开始安装优化脚本...\033[0m"
+  export INSTALL_MODE=1
+  
+  while true; do
+    read -p "请输入每周运行的天数 (0-6 0=周日): " day
+    read -p "请输入运行时间 (0-23): " hour
+    if [[ $day =~ ^[0-6]$ ]] && [[ $hour =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
+      break
+    else
+      echo -e "\033[31m✗ 无效输入，请重新输入\033[0m"
+    fi
+  done
+
+  touch "$LOG_FILE"
+  chmod 644 "$LOG_FILE"
+  log "脚本安装开始"
+
   cat <<EOF > "$SCRIPT_PATH"
 #!/bin/bash
-
-# 脚本名称：optimize_server.sh
-# 描述：通用的云服务器优化脚本，适用于 Debian 系统，适合定期自动执行。
-# 使用方法：sudo optimize_server.sh
-
-# 确保以 root 权限运行
 if [ "\$(id -u)" -ne 0 ]; then
-  echo "请以 root 权限运行此脚本。"
+  echo "请以 root 权限运行此脚本"
   exit 1
 fi
-
-# 日志文件路径
 LOG_FILE="$LOG_FILE"
-
-# 检查 /var/log 是否可写
 if [ ! -w /var/log ]; then
   LOG_FILE="/tmp/optimize_server.log"
-  echo "警告：/var/log 不可写，日志将保存到 \$LOG_FILE"
+  echo "警告：/var/log 不可写，日志将保存到 \$LOG_FILE" >&2
 fi
-
-# 记录日志
 log() {
-  echo "\$(date '+%Y-%m-%d %H:%M:%S') - \$1" | tee -a "\$LOG_FILE"
+  local timestamp=\$(date '+%Y-%m-%d %H:%M:%S')
+  echo "\$timestamp - \$1" | tee -a "\$LOG_FILE"
+  if [ -z "\$INSTALL_MODE" ]; then
+    echo "\$timestamp - 调试：日志写入到 \$LOG_FILE" | tee -a "\$LOG_FILE"
+  fi
+  sync
+  if [ \$? -ne 0 ]; then
+    echo "错误：无法写入日志到 \$LOG_FILE，请检查权限或磁盘空间" >&2
+    exit 1
+  fi
 }
-
-# 主函数
+configure_script_logrotate() {
+  log "配置脚本日志轮转..."
+  cat <<EOL > /etc/logrotate.d/optimize_server
+\$LOG_FILE {
+    rotate 7
+    daily
+    missingok
+    notifempty
+    delaycompress
+    compress
+}
+EOL
+  log "脚本日志轮转配置完成。"
+}
+check_dependencies() {
+  log "检查必要的工具和服务..."
+  for tool in logrotate apt-get uname dpkg rm; do
+    if ! command -v "\$tool" &> /dev/null; then
+      log "错误: \$tool 未找到，请安装该工具。"
+      exit 1
+    fi
+  done
+  log "所有必要工具和服务已找到。"
+}
+show_disk_usage() {
+  log "当前磁盘使用情况："
+  df -h | tee -a "\$LOG_FILE"
+  sync
+}
+configure_logrotate() {
+  log "配置 logrotate..."
+  cat <<EOL > /etc/logrotate.d/rsyslog
+/var/log/syslog
+{
+    rotate 3
+    daily
+    missingok
+    notifempty
+    delaycompress
+    compress
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate
+    endscript
+}
+EOL
+  log "logrotate 配置完成。"
+}
+clean_old_syslogs() {
+  log "清理超过15天的旧系统日志..."
+  find /var/log -type f -name "*.log" -mtime +15 -exec rm {} \; 2>> "\$LOG_FILE"
+  log "旧系统日志清理完成。"
+}
+configure_docker_logging() {
+  if ! docker info &> /dev/null; then
+    log "警告：Docker 未安装，跳过 Docker 日志轮转配置。"
+    return
+  fi
+  log "配置 Docker 日志轮转..."
+  if [ -f /etc/docker/daemon.json ]; then
+    log "备份现有 /etc/docker/daemon.json 文件..."
+    cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+  fi
+  cat <<EOL > /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+EOL
+  log "Docker 日志轮转配置完成，请手动重启 Docker 服务以应用更改。"
+}
+clean_docker_logs() {
+  if ! docker info &> /dev/null; then
+    log "警告：Docker 未安装，跳过 Docker 容器日志清理。"
+    return
+  fi
+  log "清理所有 Docker 容器日志..."
+  for container in \$(docker ps -a --format '{{.ID}}'); do
+    log_path=\$(docker inspect --format='{{.LogPath}}' "\$container")
+    if [ -n "\$log_path" ] && [ -f "\$log_path" ]; then
+      log "清理容器 \$container 的日志..."
+      echo "" > "\$log_path"
+    fi
+  done
+  log "Docker 容器日志清理完成。"
+}
+clean_apt_cache() {
+  log "清理 APT 缓存..."
+  apt-get clean
+  log "APT 缓存清理完成。"
+}
+clean_old_kernels() {
+  log "清理旧内核版本..."
+  current_kernel=\$(uname -r)
+  kernels=\$(dpkg --list | grep linux-image | awk '{print \$2}' | grep -v "\$current_kernel")
+  if [ -n "\$kernels" ]; then
+    log "即将移除以下旧内核版本：\$kernels"
+    apt-get remove --purge -y \$kernels
+    apt-get autoremove -y
+    log "旧内核版本清理完成。"
+  else
+    log "没有可清理的旧内核"
+  fi
+}
+clean_tmp_files() {
+  log "清理 /tmp 目录..."
+  if [ -d /tmp ]; then
+    find /tmp -mindepth 1 -maxdepth 1 \
+      ! -name "optimize_temp.log" \
+      ! -name "*.tmp" \
+      -exec rm -rf {} \;
+    log "临时文件清理完成。"
+  else
+    log "警告：/tmp 目录不存在，跳过清理。"
+  fi
+}
+clean_user_cache() {
+  log "清理用户缓存..."
+  for user in \$(ls /home); do
+    cache_dir="/home/\$user/.cache"
+    if [ -d "\$cache_dir" ]; then
+      rm -rf "\$cache_dir"/*
+      log "清理 \$user 的缓存完成。"
+    fi
+  done
+  if [ -d /root/.cache ]; then
+    rm -rf /root/.cache/*
+    log "清理 root 用户的缓存完成。"
+  fi
+  log "用户缓存清理完成。"
+}
 main() {
-  log "开始优化云服务器..."
-  log "优化和清理完成。"
+  log "=== 优化任务开始 ==="
+  log "调试：确认任务开始已记录"
+  show_disk_usage
+  check_dependencies
+  configure_script_logrotate
+  configure_logrotate
+  clean_old_syslogs
+  configure_docker_logging
+  clean_docker_logs
+  clean_apt_cache
+  clean_old_kernels
+  clean_tmp_files
+  clean_user_cache
+  show_disk_usage
+  log "=== 优化任务结束 ==="
 }
-
-# 运行主函数
 main
 EOF
 
-  # 赋予脚本执行权限
   chmod +x "$SCRIPT_PATH"
-  log "脚本已安装到 $SCRIPT_PATH"
-
-  # 设置 cron 作业
-  (crontab -l 2>/dev/null; echo "$((10#$hour_of_day)) $((10#$day_of_week)) * * * $SCRIPT_PATH") | crontab -
-  log "Cron 作业已设置为每周 $day_of_week 的 $hour_of_day:00 自动运行脚本。"
-
-  # 手动测试脚本
-  echo "正在手动测试脚本..."
-  $SCRIPT_PATH
-
-  # 检查测试结果
-  if grep -q "优化和清理完成" "$LOG_FILE"; then
-    echo "脚本测试成功，日志位于 $LOG_FILE"
-    log "脚本测试成功。"
+  manage_cron "$hour" "$day"
+  
+  echo -e "\033[36m▶ 正在执行初始化测试...\033[0m"
+  if "$SCRIPT_PATH" && grep -q "=== 优化任务开始 ===" "$LOG_FILE" && grep -q "=== 优化任务结束 ===" "$LOG_FILE"; then
+    echo -e "\033[32m✔ 脚本安装成功\033[0m"
+    log "脚本安装验证成功"
   else
-    echo "脚本测试失败，请检查日志 $LOG_FILE"
-    log "脚本测试失败。"
+    echo -e "\033[31m✗ 脚本测试失败，请检查日志\033[0m"
+    echo "当前日志内容：" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
   fi
+  unset INSTALL_MODE
 }
 
-# 查看日志
-view_log() {
-  if [ -f "$LOG_FILE" ]; then
-    tail -f "$LOG_FILE"
-    echo "按 Ctrl+C 退出查看日志。"
-    read -p "按 Enter 键继续..."
-  else
-    echo "日志文件 $LOG_FILE 不存在。"
-  fi
-}
-
-# 手动更新系统和软件包
-manual_update() {
-  if check_script_exists; then
-    log "手动更新系统和软件包..."
-    apt-get update
-    apt-get upgrade -y
-    log "系统和软件包更新完成。"
-  else
-    echo "脚本 $SCRIPT_PATH 未安装。"
-    log "错误: 脚本 $SCRIPT_PATH 未安装，无法手动更新系统和软件包。"
-  fi
-}
-
-# 查看当前脚本运行情况
-view_script_status() {
-  if check_script_exists; then
-    echo "脚本 $SCRIPT_PATH 已安装。"
-  else
-    echo "脚本 $SCRIPT_PATH 未安装。"
-    return
+view_status() {
+  clear
+  echo -e "\033[34m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▌ 任务状态信息 ▍▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\033[0m"
+  
+  if [ -z "$LOG_FILE" ]; then
+    echo "错误：日志文件路径未定义"
+    return 1
   fi
 
-  # 获取 cron 作业
+  if [ ! -f "$LOG_FILE" ]; then
+    echo -e "\033[33m警告：日志文件不存在\033[0m"
+    return 1
+  fi
+
+  start_line=$(grep "=== 优化任务开始 ===" "$LOG_FILE" | tail -1)
+  end_line=$(grep "=== 优化任务结束 ===" "$LOG_FILE" | tail -1)
+  start_time=$(echo "$start_line" | awk '{print $1 " " $2}')
+  end_time=$(echo "$end_line" | awk '{print $1 " " $2}')
+
+  echo -e "\n🕒 最近一次执行详情："
+  echo "   • 日志文件路径: $LOG_FILE"
+  echo "   • 日志文件大小: $(du -h "$LOG_FILE" | cut -f1)"
+  if [[ -n "$start_time" && -n "$end_time" ]]; then
+    echo "   • 开始时间: $start_time"
+    echo "   • 结束时间: $end_time"
+    start_seconds=$(date -d "$start_time" +%s 2>/dev/null)
+    end_seconds=$(date -d "$end_time" +%s 2>/dev/null)
+    if [[ -n "$start_seconds" && -n "$end_seconds" ]]; then
+      duration=$((end_seconds - start_seconds))
+      echo "   • 执行时长: $duration 秒"
+    else
+      echo "   • 执行时长: \033[33m无法计算\033[0m"
+    fi
+    echo -e "   • 上一次执行的任务："
+    sed -n "/$start_time - === 优化任务开始 ===/,/$end_time - === 优化任务结束 ===/p" "$LOG_FILE" | grep -v "调试" | grep -v "===" | while read -r line; do
+      task=$(echo "$line" | sed 's/^[0-9-]\+ [0-9:]\+ - //')
+      if [[ "$task" =~ "完成" || "$task" =~ "没有" || "$task" =~ "清理" ]]; then
+        echo "     ✔ $task"
+      fi
+    done
+  else
+    echo -e "   • \033[33m未找到完整的执行记录\033[0m"
+  fi
+
   cron_job=$(crontab -l 2>/dev/null | grep "$SCRIPT_PATH")
   if [ -n "$cron_job" ]; then
-    # 解析 cron 表达式
-    cron_minute=$(echo "$cron_job" | awk '{print $1}')
-    cron_hour=$(echo "$cron_job" | awk '{print $2}')
-    cron_day_of_week=$(echo "$cron_job" | awk '{print $5}')
-    cron_command=$(echo "$cron_job" | awk '{$1=$2=$3=$4=$5=""; print substr($0, 6)}')
-
-    # 将星期几转换为中文
-    case "$cron_day_of_week" in
-      0) day_of_week="星期日" ;;
-      1) day_of_week="星期一" ;;
-      2) day_of_week="星期二" ;;
-      3) day_of_week="星期三" ;;
-      4) day_of_week="星期四" ;;
-      5) day_of_week="星期五" ;;
-      6) day_of_week="星期六" ;;
-      *) day_of_week="未知" ;;
-    esac
-
-    echo "计划任务: $cron_job"
-    echo "计划任务执行时间: 每周 $day_of_week 的 $cron_hour:$cron_minute"
-  else
-    echo "未找到计划任务。"
-  fi
-
-  # 获取上一次执行的日期和时间
-  if [ -f "$LOG_FILE" ]; then
-    last_run=$(grep "优化和清理完成" "$LOG_FILE" | tail -n 1 | awk '{print $1" "$2}')
-    echo "上一次执行日期和时间: $last_run"
-  else
-    echo "日志文件 $LOG_FILE 不存在，无法获取上一次执行信息。"
-  fi
-
-  # 获取上一次执行的结果
-  if [ -f "$LOG_FILE" ]; then
-    last_result=$(grep "优化和清理完成" "$LOG_FILE" | tail -n 1)
-    if [ -n "$last_result" ]; then
-      echo "上一次执行结果: 成功"
+    cron_min=$(echo "$cron_job" | awk '{print $1}')
+    cron_hr=$(echo "$cron_job" | awk '{print $2}')
+    cron_day_num=$(echo "$cron_job" | awk '{print $5}')
+    cron_day=$(convert_weekday "$cron_day_num")
+    echo -e "\n当前计划任务："
+    printf "  每周 星期%s %02d:%02d\n" "$cron_day" "$cron_hr" "$cron_min"
+    current_day=$(date +%w)
+    current_hour=$(date +%H | sed 's/^0//')
+    current_min=$(date +%M | sed 's/^0//')
+    if [[ $current_day -lt $cron_day_num ]] || \
+       ([[ $current_day -eq $cron_day_num ]] && [[ $current_hour -lt $cron_hr ]]) || \
+       ([[ $current_day -eq $cron_day_num ]] && [[ $current_hour -eq $cron_hr ]] && [[ $current_min -lt $cron_min ]]); then
+      days_until=$((cron_day_num - current_day))
     else
-      echo "上一次执行结果: 失败"
+      days_until=$((7 - current_day + cron_day_num))
     fi
+    next_run=$(date -d "+$days_until days $cron_hr:$cron_min" "+%Y-%m-%d %H:%M")
+    echo -e "下次执行时间：\n  $next_run"
+    echo -e "\n下次执行任务："
+    echo "  ✔ 检查必要的工具和服务"
+    echo "  ✔ 配置脚本日志轮转"
+    echo "  ✔ 配置系统日志轮转"
+    echo "  ✔ 清理超过15天的旧系统日志"
+    echo "  ✔ 配置 Docker 日志轮转"
+    echo "  ✔ 清理 Docker 容器日志"
+    echo "  ✔ 清理 APT 缓存"
+    echo "  ✔ 清理旧内核版本"
+    echo "  ✔ 清理 /tmp 目录"
+    echo "  ✔ 清理用户缓存"
   else
-    echo "日志文件 $LOG_FILE 不存在，无法获取上一次执行结果。"
+    echo -e "当前计划任务：\033[33m未设置\033[0m"
   fi
 
-  # 计算下一次执行时间
-  current_time=$(date +%s)
-  cron_time=$(date -d "$(date +%Y-%m-%d) $cron_hour:$cron_minute:00" +%s)
-  while [ "$cron_time" -le "$current_time" ]; do
-    cron_time=$(date -d "+1 week" +%Y-%m-%d)T$cron_hour:$cron_minute:00
-    cron_time=$(date -d "$cron_time" +%s)
+  echo -e "\033[34m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\033[0m"
+}
+
+install_alias() {
+  echo -e "\033[36m▶ 快捷命令安装向导\033[0m"
+  read -p "请输入命令名称 (默认cristsau): " cmd
+  cmd=${cmd:-cristsau}
+  if ! [[ "$cmd" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo -e "\033[31m✗ 包含非法字符，只能使用字母数字和下划线\033[0m"
+    return 1
+  fi
+  ln -sf "$(readlink -f "$0")" "/usr/local/bin/$cmd"
+  chmod +x "/usr/local/bin/$cmd"
+  echo -e "\033[32m✔ 已创建快捷命令：\033[36m$cmd\033[0m"
+  echo -e "现在可以直接使用 \033[33m$cmd\033[0m 来启动管理工具"
+}
+
+uninstall() {
+  echo -e "\033[31m▶ 开始卸载...\033[0m"
+  manage_cron
+  log "计划任务已移除"
+  [ -f "$SCRIPT_PATH" ] && rm -v "$SCRIPT_PATH"
+  [ -f "/usr/local/bin/cristsau" ] && rm -v "/usr/local/bin/cristsau"
+  echo -e "\n\033[33m⚠ 日志文件仍保留在：$LOG_FILE\033[0m"
+  echo -e "\033[31m✔ 卸载完成\033[0m"
+}
+
+toolbox_menu() {
+  while true; do
+    clear
+    echo -e "\033[34m▌ 工具箱 ▍\033[0m"
+    echo -e "\033[36m"
+    echo " 1) 升级或安装最新 Docker"
+    echo " 2) 同步服务器时间"
+    echo " 3) 退出"
+    echo -e "\033[0m"
+    read -p "请输入选项 (1-3): " tool_choice
+    case $tool_choice in
+      1)
+        echo -e "\033[36m▶ 检查 Docker 状态...\033[0m"
+        if ! command -v curl >/dev/null 2>&1 || ! command -v apt-cache >/dev/null 2>&1; then
+          echo -e "\033[31m✗ 缺少必要工具（curl 或 apt-cache），请先安装\033[0m"
+          echo "安装命令: sudo apt-get install -y curl apt"
+          continue
+        fi
+        if command -v docker >/dev/null 2>&1; then
+          current_version=$(docker --version | awk '{print $3}' | sed 's/,//')
+          echo -e "当前 Docker 版本: $current_version"
+          if ! grep -r "download.docker.com" /etc/apt/sources.list /etc/apt/sources.list.d/ >/dev/null 2>&1; then
+            echo -e "\033[36m添加 Docker 官方 APT 源...\033[0m"
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - >/dev/null 2>&1
+            echo "deb [arch=amd64] https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]') $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+          fi
+          sudo apt-get update -qq >/dev/null 2>&1
+          latest_version=$(apt-cache madison docker-ce | grep -oP '\d+\.\d+\.\d+' | head -1)
+          if [ -z "$latest_version" ]; then
+            echo -e "\033[31m✗ 无法获取最新 Docker 版本，请检查网络或 APT 源\033[0m"
+            continue
+          fi
+          echo -e "最新 Docker 版本: $latest_version"
+          if [ "$current_version" = "$latest_version" ]; then
+            echo -e "\033[32m✔ 当前已是最新版本，无需升级\033[0m"
+            read -p "是否强制重新安装？(y/N): " force_install
+            if [ "$force_install" != "y" ] && [ "$force_install" != "Y" ]; then
+              continue
+            fi
+          fi
+        else
+          echo -e "\033[33m未检测到 Docker，将安装最新版本\033[0m"
+          echo -e "\033[36m添加 Docker 官方 APT 源...\033[0m"
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - >/dev/null 2>&1
+          echo "deb [arch=amd64] https://download.docker.com/linux/$(lsb_release -is | tr '[:upper:]' '[:lower:]') $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+          sudo apt-get update -qq >/dev/null 2>&1
+        fi
+        echo -e "\033[36m▶ 正在升级或安装最新 Docker...\033[0m"
+        curl -fsSL https://get.docker.com | sudo sh
+        if [ $? -eq 0 ]; then
+          echo -e "\033[32m✔ Docker 安装/升级成功\033[0m"
+          log "Docker 安装或升级完成"
+        else
+          echo -e "\033[31m✗ Docker 安装/升级失败\033[0m"
+          log "Docker 安装或升级失败"
+        fi
+        ;;
+      2)
+        echo -e "\033[36m▶ 正在同步服务器时间...\033[0m"
+        sudo apt-get update && \
+        sudo apt-get install -y systemd-timesyncd && \
+        sudo systemctl enable systemd-timesyncd && \
+        sudo systemctl start systemd-timesyncd && \
+        sudo timedatectl set-ntp true && \
+        timedatectl status
+        if [ $? -eq 0 ]; then
+          echo -e "\033[32m✔ 服务器时间同步成功\033[0m"
+          log "服务器时间同步完成"
+        else
+          echo -e "\033[31m✗ 服务器时间同步失败\033[0m"
+          log "服务器时间同步失败"
+        fi
+        ;;
+      3) return ;;
+      *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
+    esac
+    read -p "按回车继续..."
   done
-  next_run=$(date -d "@$cron_time" +"%Y-%m-%d %H:%M:%S")
-  next_run_day=$(date -d "@$cron_time" +"%u")
-  next_run_time=$(date -d "@$cron_time" +"%H:%M")
-
-  # 将星期几转换为中文
-  case "$next_run_day" in
-    0) next_run_day="星期日" ;;
-    1) next_run_day="星期一" ;;
-    2) next_run_day="星期二" ;;
-    3) next_run_day="星期三" ;;
-    4) next_run_day="星期四" ;;
-    5) next_run_day="星期五" ;;
-    6) next_run_day="星期六" ;;
-    *) next_run_day="未知" ;;
-  esac
-
-  echo "下一次执行日期和时间: $next_run_day 的 $next_run_time"
 }
 
-# 更新当前脚本
-update_script() {
-  log "开始更新脚本..."
-
-  # 动态生成 GITHUB_URL
-  temp_script="/tmp/setup_optimize_server.sh"
-  wget -O "$temp_script" "$GITHUB_URL"
-  if [ $? -ne 0 ]; then
-    log "脚本更新失败。"
-    echo "脚本更新失败，请检查网络连接和文件路径。"
-    return
-  fi
-
-  # 比较当前脚本和临时脚本的哈希值
-  current_hash=$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')
-  new_hash=$(sha256sum "$temp_script" | awk '{print $1}')
-
-  if [ "$current_hash" == "$new_hash" ]; then
-    echo "当前版本已最新，无需更新。"
-    log "当前版本已最新，无需更新。"
-    rm -f "$temp_script"
-    return
-  fi
-
-  # 替换当前脚本
-  mv "$temp_script" "$SCRIPT_PATH"
-  chmod +x "$SCRIPT_PATH"
-  log "脚本已成功更新。"
-  echo "脚本已成功更新。"
-}
-
-# 卸载脚本
-uninstall_script() {
-  if check_script_exists; then
-    # 删除脚本文件
-    rm -f "$SCRIPT_PATH"
-    log "脚本 $SCRIPT_PATH 已删除"
-
-    # 删除 cron 作业
-    crontab -l | grep -v "$SCRIPT_PATH" | crontab -
-    log "Cron 作业已删除"
-
-    # 删除日志文件
-    rm -f "$LOG_FILE"
-    log "日志文件 $LOG_FILE 已删除"
-
-    echo "脚本已完全卸载。"
-  else
-    echo "脚本 $SCRIPT_PATH 未安装。"
-  fi
-}
-
-# 主循环
-while true; do
+show_menu() {
   clear
-  show_title
+  echo -e "\033[34m
+   ██████╗██████╗ ██╗███████╗████████╗███████╗ █████╗ ██╗   ██╗
+  ██╔════╝██╔══██╗██║██╔════╝╚══██╔══╝██╔════╝██╔══██╗██║   ██║
+  ██║     ██████╔╝██║███████╗   ██║   ███████╗███████║██║   ██║
+  ██║     ██╔══██╗██║╚════██║   ██║   ╚════██║██╔══██║██║   ██║
+  ╚██████╗██║  ██║██║███████║   ██║   ███████║██║  ██║╚██████╔╝
+   ╚═════╝╚═╝  ╚═╝╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ ╚═════╝ 
+  \033[0m"
+  echo -e "\033[36m"
+  echo " 1) 安装/配置优化脚本"
+  echo " 2) 实时监控日志"
+  echo " 3) 查看任务状态"
+  echo " 4) 手动执行优化任务"
+  echo " 5) 创建快捷命令"
+  echo " 6) 完全卸载本工具"
+  echo " 7) 工具箱"
+  echo " 8) 退出"
+  echo -e "\033[0m"
+}
+
+while true; do
   show_menu
   read -p "请输入选项 (1-8): " choice
   case $choice in
-    1)
-      install_script
+    1) install_script ;;
+    2) 
+      echo "正在实时监控日志文件：$LOG_FILE"
+      echo "提示：请在新终端中选择选项 4 手动执行优化任务，以观察实时日志更新"
+      echo "按 Ctrl+C 退出监控"
+      tail -f "$LOG_FILE"
       ;;
-    2)
-      view_log
-      ;;
-    3)
-      manual_update
-      ;;
-    4)
-      view_script_status
-      ;;
-    5)
-      update_script
-      ;;
-    6)
-      uninstall_script
-      ;;
-    7)
-      self_install
-      ;;
-    8)
-      echo "退出脚本。"
-      exit 0
-      ;;
-    *)
-      echo "无效的选项，请重新输入。"
-      ;;
+    3) view_status && read -p "按回车返回菜单..." ;;
+    4) "$SCRIPT_PATH" ;;
+    5) install_alias ;;
+    6) uninstall && exit ;;
+    7) toolbox_menu ;;
+    8) exit 0 ;;
+    *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
   esac
-  read -p "按 Enter 键继续..."
+  read -p "按回车继续..."
 done
-
