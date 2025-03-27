@@ -2,7 +2,7 @@
 
 # 脚本名称：setup_optimize_server.sh
 # 作者：cristsau
-# 版本：3.4
+# 版本：3.5
 # 功能：服务器优化管理工具
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -466,13 +466,39 @@ show_menu() {
   echo " 5) 创建快捷命令"
   echo " 6) 完全卸载本工具"
   echo " 7) 工具箱"
-  echo " 8) 退出"
+  echo " 8) 从 GitHub 更新脚本"
+  echo " 9) 退出"
   echo -e "\033[0m"
+}
+
+update_from_github() {
+  echo -e "\033[36m▶ 从 GitHub 更新脚本...\033[0m"
+  TARGET_DIR="/root/data/cristsau/optimize_server"
+  TARGET_PATH="$TARGET_DIR/setup_optimize_server.sh"
+  GITHUB_URL="https://raw.githubusercontent.com/cristsau/server-optimization-scripts/main/setup_optimize_server.sh"
+  
+  echo "目标路径: $TARGET_PATH"
+  echo "下载命令如下，你可以手动复制运行："
+  echo -e "\033[33mmkdir -p $TARGET_DIR && wget -O $TARGET_PATH $GITHUB_URL && chmod +x $TARGET_PATH && sudo $TARGET_PATH\033[0m"
+  
+  read -p "是否直接执行下载并运行？(y/N): " confirm
+  if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+    mkdir -p "$TARGET_DIR"
+    if wget -O "$TARGET_PATH" "$GITHUB_URL"; then
+      chmod +x "$TARGET_PATH"
+      echo -e "\033[32m✔ 脚本下载成功，正在运行...\033[0m"
+      sudo "$TARGET_PATH"
+    else
+      echo -e "\033[31m✗ 下载失败，请检查网络或 GitHub 地址\033[0m"
+    fi
+  else
+    echo -e "\033[33m已取消自动下载，请手动运行上述命令\033[0m"
+  fi
 }
 
 while true; do
   show_menu
-  read -p "请输入选项 (1-8): " choice
+  read -p "请输入选项 (1-9): " choice
   case $choice in
     1) install_script ;;
     2) 
@@ -486,7 +512,8 @@ while true; do
     5) install_alias ;;
     6) uninstall && exit ;;
     7) toolbox_menu ;;
-    8) exit 0 ;;
+    8) update_from_github ;;
+    9) exit 0 ;;
     *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
   esac
   read -p "按回车继续..."
