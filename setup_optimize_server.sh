@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# 脚本名称：setup_optimize_server.sh
-# 作者：cristsau
-# 版本：3.8
-# 功能：服务器优化管理工具
-
 if [ "$(id -u)" -ne 0 ]; then
   echo -e "\033[31m✗ 请使用 root 权限运行此脚本\033[0m"
   exit 1
@@ -14,15 +9,13 @@ SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
 TEMP_LOG="/tmp/optimize_temp.log"
-CURRENT_VERSION="3.8"  # 当前脚本版本
+CURRENT_VERSION="3.9"
 BACKUP_CRON="/etc/cron.d/backup_cron"
+CONFIG_FILE="/etc/backup.conf"
 
 log() {
   local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
   echo "$timestamp - $1" | tee -a "$LOG_FILE"
-  if [ -z "$INSTALL_MODE" ]; then
-    echo "$timestamp - 调试：日志写入到 $LOG_FILE" | tee -a "$LOG_FILE"
-  fi
   sync
   if [ $? -ne 0 ]; then
     echo "错误：无法写入日志到 $LOG_FILE，请检查权限或磁盘空间" >&2
@@ -52,6 +45,38 @@ manage_cron() {
     (crontab -l 2>/dev/null; echo "$cron_min $cron_hr * * $cron_day $SCRIPT_PATH") | crontab -
     log "已设置优化任务：每周 $cron_day 的 $cron_hr:00"
   fi
+}
+
+load_config() {
+  if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+    log "已加载配置文件: $CONFIG_FILE"
+    return 0
+  else
+    echo -e "\033[33m警告：未找到配置文件 $CONFIG_FILE\033[0m"
+    return 1
+  fi
+}
+
+create_config() {
+  echo -e "\033[36m▶ 创建备份配置文件...\033[0m"
+  cat <<EOF > "$CONFIG_FILE"
+# 数据库配置
+DB_TYPE=postgres
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASS=
+
+# 备份目标配置
+TARGET_PATH=https://nas.cvv.gr/dav/CrisTsau/local/backup/lobechat/postgres
+TARGET_USER=cristsau
+TARGET_PASS=
+EOF
+  chmod 600 "$CONFIG_FILE"
+  echo -e "\033[32m✔ 配置文件已创建: $CONFIG_FILE\033[0m"
+  echo "请编辑 $CONFIG_FILE 并填入正确的密码"
+  log "配置文件创建成功: $CONFIG_FILE"
 }
 
 install_script() {
@@ -86,9 +111,6 @@ fi
 log() {
   local timestamp=\$(date '+%Y-%m-%d %H:%M:%S')
   echo "\$timestamp - \$1" | tee -a "\$LOG_FILE"
-  if [ -z "\$INSTALL_MODE" ]; then
-    echo "\$timestamp - 调试：日志写入到 \$LOG_FILE" | tee -a "\$LOG_FILE"
-  fi
   sync
   if [ \$? -ne 0 ]; then
     echo "错误：无法写入日志到 \$LOG_FILE，请检查权限或磁盘空间" >&2
@@ -230,7 +252,6 @@ clean_user_cache() {
 }
 main() {
   log "=== 优化任务开始 ==="
-  log "调试：确认任务开始已记录"
   show_disk_usage
   check_dependencies
   configure_script_logrotate
@@ -273,11 +294,34 @@ view_status() {
     return 1
   fi
 
-  echo -e "\n\033[36m▌ 脚本配置信息 ▍\033[0m"
+  echo -e "\n\033[36m▌ 脚本安装信息 ▍\033[0m"
   echo "当前脚本版本: $CURRENT_VERSION"
   echo "优化脚本路径: $SCRIPT_PATH"
   echo "日志文件路径: $LOG_FILE"
   echo "日志文件大小: $(du -h "$LOG_FILE" | cut -f1 2>/dev/null || echo '未知')"
+  if [ -f "$SCRIPT_PATH" ]; then
+    echo "安装状态: 已安装"
+    install_time=$(stat -c %Y "$SCRIPT_PATH" 2>/dev/null)
+    if [ -n "$install_time" ]; then
+      echo "安装时间: $(date -d "@$install_time" '+%Y-%m-%d %H:%M:%S')"
+    fi
+  else
+    echo "安装状态: 未安装"
+  fi
+
+  echo -e "\n\033[36m▌ 已安装的数据库客户端工具 ▍\033[0m"
+  echo -n "MySQL 客户端: "
+  if command -v mysqldump >/dev/null 2>&1; then
+    echo "已安装 (mysqldump: $(which mysqldump))"
+  else
+    echo "未安装"
+  fi
+  echo -n "PostgreSQL 客户端: "
+  if command -v psql >/dev/null 2>&1 && command -v pg_dump >/dev/null 2>&1; then
+    echo "已安装 (psql: $(which psql), pg_dump: $(which pg_dump))"
+  else
+    echo "未安装"
+  fi
 
   echo -e "\n\033[36m▌ 所有计划任务 ▍\033[0m"
   echo -e "优化任务："
@@ -331,7 +375,7 @@ view_status() {
       echo "执行时长: \033[33m无法计算\033[0m"
     fi
     echo -e "执行的任务："
-    sed -n "/$start_time - === 优化任务开始 ===/,/$end_time - === 优化任务结束 ===/p" "$LOG_FILE" | grep -v "调试" | grep -v "===" | while read -r line; do
+    sed -n "/$start_time - === 优化任务开始 ===/,/$end_time - === 优化任务结束 ===/p" "$LOG_FILE" | grep -v "===" | while read -r line; do
       task=$(echo "$line" | sed 's/^[0-9-]\+ [0-9:]\+ - //')
       if [[ "$task" =~ "完成" || "$task" =~ "没有" || "$task" =~ "清理" ]]; then
         echo "  ✔ $task"
@@ -362,7 +406,8 @@ uninstall() {
   echo -e "\033[31m▶ 开始卸载...\033[0m"
   manage_cron
   [ -f "$BACKUP_CRON" ] && rm -v "$BACKUP_CRON"
-  log "所有计划任务已移除"
+  [ -f "$CONFIG_FILE" ] && rm -v "$CONFIG_FILE"
+  log "所有计划任务和配置文件已移除"
   [ -f "$SCRIPT_PATH" ] && rm -v "$SCRIPT_PATH"
   [ -f "/usr/local/bin/cristsau" ] && rm -v "/usr/local/bin/cristsau"
   echo -e "\n\033[33m⚠ 日志文件仍保留在：$LOG_FILE\033[0m"
@@ -506,7 +551,32 @@ upload_backup() {
   case $protocol in
     webdav)
       echo -e "\033[36m正在上传到 WebDAV: $url...\033[0m"
-      curl -u "$username:$password" -T "$file" "$url" >/dev/null 2>&1
+      curl -u "$username:$password" -T "$file" "$url" -v >"$TEMP_LOG" 2>&1
+      curl_status=$?
+      log "curl 上传返回码: $curl_status"
+      if [ $curl_status -eq 0 ]; then
+        curl -u "$username:$password" -I "$url" >"$TEMP_LOG" 2>&1
+        if grep -q "HTTP/[0-9.]* 200" "$TEMP_LOG" || grep -q "HTTP/[0-9.]* 201" "$TEMP_LOG"; then
+          echo -e "\033[32m✔ 上传成功: $url\033[0m"
+          log "备份上传成功: $url"
+          rm -f "$file"
+          rm -f "$TEMP_LOG"
+          return 0
+        else
+          echo -e "\033[31m✗ 上传失败：服务器未确认文件存在\033[0m"
+          echo "服务器响应："
+          cat "$TEMP_LOG"
+          log "备份上传失败: 服务器未确认文件存在"
+          rm -f "$TEMP_LOG"
+          return 1
+        fi
+      else
+        echo -e "\033[31m✗ 上传失败：\033[0m"
+        cat "$TEMP_LOG"
+        log "备份上传失败: $(cat "$TEMP_LOG")"
+        rm -f "$TEMP_LOG"
+        return 1
+      fi
       ;;
     ftp)
       echo -e "\033[36m正在上传到 FTP: $url...\033[0m"
@@ -531,7 +601,15 @@ EOF
     local)
       mkdir -p "$target"
       mv "$file" "$target/$filename"
-      return 0
+      if [ $? -eq 0 ]; then
+        echo -e "\033[32m✔ 本地备份成功: $target/$filename\033[0m"
+        log "本地备份成功: $target/$filename"
+        return 0
+      else
+        echo -e "\033[31m✗ 本地备份失败\033[0m"
+        log "本地备份失败"
+        return 1
+      fi
       ;;
   esac
 
@@ -545,6 +623,50 @@ EOF
     log "备份上传失败: $url"
     return 1
   fi
+}
+
+install_db_client() {
+  local db_type=$1
+  if [ "$db_type" = "mysql" ]; then
+    if ! command -v mysqldump >/dev/null 2>&1; then
+      echo -e "\033[33m警告：mysqldump 未安装\033[0m"
+      read -p "是否安装 MySQL 客户端？(y/N): " install_choice
+      if [ "$install_choice" = "y" ] || [ "$install_choice" = "Y" ]; then
+        apt-get update && apt-get install -y mysql-client
+        if [ $? -eq 0 ]; then
+          echo -e "\033[32m✔ MySQL 客户端安装成功\033[0m"
+          log "MySQL 客户端安装成功"
+        else
+          echo -e "\033[31m✗ MySQL 客户端安装失败\033[0m"
+          log "MySQL 客户端安装失败"
+          return 1
+        fi
+      else
+        echo -e "\033[31m✗ 未安装 MySQL 客户端，无法备份\033[0m"
+        return 1
+      fi
+    fi
+  elif [ "$db_type" = "postgres" ]; then
+    if ! command -v pg_dump >/dev/null 2>&1 || ! command -v psql >/dev/null 2>&1; then
+      echo -e "\033[33m警告：PostgreSQL 客户端（pg_dump 或 psql）未安装\033[0m"
+      read -p "是否安装 PostgreSQL 客户端？(y/N): " install_choice
+      if [ "$install_choice" = "y" ] || [ "$install_choice" = "Y" ]; then
+        apt-get update && apt-get install -y postgresql-client
+        if [ $? -eq 0 ]; then
+          echo -e "\033[32m✔ PostgreSQL 客户端安装成功\033[0m"
+          log "PostgreSQL 客户端安装成功"
+        else
+          echo -e "\033[31m✗ PostgreSQL 客户端安装失败\033[0m"
+          log "PostgreSQL 客户端安装失败"
+          return 1
+        fi
+      else
+        echo -e "\033[31m✗ 未安装 PostgreSQL 客户端，无法备份\033[0m"
+        return 1
+      fi
+    fi
+  fi
+  return 0
 }
 
 backup_menu() {
@@ -575,64 +697,120 @@ backup_menu() {
         timestamp=$(date '+%Y%m%d_%H%M%S')
         backup_file="/tmp/backup_data_$timestamp.tar.gz"
         echo -e "\033[36m正在备份 $source_path 到 $backup_file...\033[0m"
-        tar -czf "$backup_file" -C "$source_path" . 2>/dev/null
+        tar -czf "$backup_file" -C "$source_path" . 2>"$TEMP_LOG"
         if [ $? -eq 0 ]; then
           upload_backup "$backup_file" "$target_path" "$username" "$password" && \
           echo -e "\033[32m✔ 备份成功\033[0m" || \
-          echo -e "\033[31m✗ 备份失败\033[0m"
+          echo -e "\033[31m✗ 备份失败，请查看日志\033[0m"
         else
-          echo -e "\033[31m✗ 备份失败，请检查路径或权限\033[0m"
-          log "程序数据备份失败"
-          rm -f "$backup_file"
+          echo -e "\033[31m✗ 备份失败：\033[0m"
+          cat "$TEMP_LOG"
+          log "程序数据备份失败: $(cat "$TEMP_LOG")"
+          rm -f "$backup_file" "$TEMP_LOG"
         fi
         ;;
       2)
         echo -e "\033[36m▶ 备份数据库...\033[0m"
-        read -p "请输入数据库类型 (mysql/postgres): " db_type
-        case "$db_type" in
-          mysql)
-            if ! command -v mysqldump >/dev/null 2>&1; then
-              echo -e "\033[31m✗ mysqldump 未安装，请安装：sudo apt-get install mysql-client\033[0m"
-              continue
-            fi
-            ;;
-          postgres)
-            if ! command -v pg_dump >/dev/null 2>&1; then
-              echo -e "\033[31m✗ pg_dump 未安装，请安装：sudo apt-get install postgresql-client\033[0m"
-              continue
-            fi
-            ;;
-          *)
-            echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+        if load_config; then
+          db_type=$DB_TYPE
+          db_host=$DB_HOST
+          db_port=$DB_PORT
+          db_user=$DB_USER
+          db_pass=$DB_PASS
+          target_path=$TARGET_PATH
+          username=$TARGET_USER
+          password=$TARGET_PASS
+          echo -e "\033[32m✔ 已从配置文件加载参数\033[0m"
+        else
+          read -p "是否创建配置文件？(y/N): " create_choice
+          if [ "$create_choice" = "y" ] || [ "$create_choice" = "Y" ]; then
+            create_config
+            echo "请编辑 $CONFIG_FILE 并重新运行脚本"
             continue
-            ;;
-        esac
-        read -p "请输入数据库用户: " db_user
-        read -s -p "请输入数据库密码: " db_pass
-        echo
+          fi
+          read -p "请输入数据库类型 (mysql/postgres): " db_type
+          case "$db_type" in
+            mysql|postgres)
+              install_db_client "$db_type" || continue
+              ;;
+            *)
+              echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+              continue
+              ;;
+          esac
+          read -p "请输入数据库主机名 (默认 localhost): " db_host
+          db_host=${db_host:-localhost}
+          read -p "请输入数据库端口 (默认 3306 for MySQL, 5432 for PostgreSQL): " db_port
+          db_port=${db_port:-$( [ "$db_type" = "mysql" ] && echo 3306 || echo 5432 )}
+          read -p "请输入数据库用户: " db_user
+          read -s -p "请输入数据库密码: " db_pass
+          echo
+          read -p "请输入目标路径 (例如 /backup/db 或 sftp://example.com): " target_path
+          read -p "请输入用户名（本地备份留空）: " username
+          if [ -n "$username" ]; then
+            read -s -p "请输入密码（或 SSH 密钥路径）: " password
+            echo
+          fi
+        fi
+        echo -e "\033[36m正在测试数据库连接...\033[0m"
+        if [ "$db_type" = "mysql" ]; then
+          mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" >"$TEMP_LOG" 2>&1
+          if [ $? -ne 0 ]; then
+            echo -e "\033[31m✗ 数据库连接失败：\033[0m"
+            cat "$TEMP_LOG"
+            log "MySQL 连接失败: $(cat "$TEMP_LOG")"
+            rm -f "$TEMP_LOG"
+            continue
+          fi
+        elif [ "$db_type" = "postgres" ]; then
+          export PGPASSWORD="$db_pass"
+          psql -h "$db_host" -p "$db_port" -U "$db_user" -d "postgres" -c "SELECT 1;" >"$TEMP_LOG" 2>&1
+          if [ $? -ne 0 ]; then
+            echo -e "\033[31m✗ 数据库连接失败：\033[0m"
+            cat "$TEMP_LOG"
+            log "PostgreSQL 连接失败: $(cat "$TEMP_LOG")"
+            rm -f "$TEMP_LOG"
+            unset PGPASSWORD
+            continue
+          fi
+          unset PGPASSWORD
+        fi
+        echo -e "\033[32m✔ 数据库连接成功\033[0m"
+        rm -f "$TEMP_LOG"
         read -p "是否备份所有数据库？(y/N): " all_dbs
         if [ "$all_dbs" = "y" ] || [ "$all_dbs" = "Y" ]; then
           db_list="all"
         else
           echo -e "\033[36m正在获取数据库列表...\033[0m"
           if [ "$db_type" = "mysql" ]; then
-            db_list=$(mysql -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
+            db_list=$(mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>"$TEMP_LOG" | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
           elif [ "$db_type" = "postgres" ]; then
-            db_list=$(psql -U "$db_user" -lqt 2>/dev/null | cut -d'|' -f1 | grep -v "template" | grep -v "postgres" | sed 's/ //g')
+            export PGPASSWORD="$db_pass"
+            db_list=$(psql -h "$db_host" -p "$db_port" -U "$db_user" -d "postgres" -t -c "SELECT datname FROM pg_database WHERE datistemplate = false;" 2>"$TEMP_LOG" | sed 's/ //g')
+            unset PGPASSWORD
+            if [ -s "$TEMP_LOG" ]; then
+              echo -e "\033[31m✗ 获取数据库列表失败：\033[0m"
+              cat "$TEMP_LOG"
+              log "获取数据库列表失败: $(cat "$TEMP_LOG")"
+              rm -f "$TEMP_LOG"
+              continue
+            fi
           fi
           if [ -z "$db_list" ]; then
-            echo -e "\033[31m✗ 获取数据库列表失败，请检查用户权限或密码\033[0m"
+            echo -e "\033[31m✗ 获取数据库列表为空，请检查用户权限或数据库配置\033[0m"
             continue
           fi
           echo -e "可用数据库：\n$db_list"
           read -p "请输入要备份的数据库名称（多个用空格分隔，或输入 all 备份所有）：" db_names
           db_list="$db_names"
         fi
-        read -p "请输入目标路径 (例如 /backup/db 或 sftp://example.com): " target_path
-        read -p "请输入用户名（本地备份留空）: " username
-        if [ -n "$username" ]; then
-          read -s -p "请输入密码（或 SSH 密钥路径）: " password
-          echo
+        if [ -z "$target_path" ]; then
+          read -p "请输入目标路径 (例如 /backup/db 或 sftp://example.com): " target_path
+          read -p "请输入用户名（本地备份留空）: " username
+          if [ -n "$username" ]; then
+            read -s -p "请输入密码（或 SSH 密钥路径）: " password
+            echo
+          fi
         fi
         timestamp=$(date '+%Y%m%d_%H%M%S')
         if [ "$db_list" = "all" ]; then
@@ -640,46 +818,53 @@ backup_menu() {
           case "$db_type" in
             mysql)
               echo -e "\033[36m正在备份所有 MySQL 数据库...\033[0m"
-              mysqldump -u "$db_user" -p"$db_pass" --all-databases | gzip > "$backup_file"
+              mysqldump -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" --all-databases 2>"$TEMP_LOG" | gzip > "$backup_file"
               ;;
             postgres)
               echo -e "\033[36m正在备份所有 PostgreSQL 数据库...\033[0m"
-              pg_dumpall -U "$db_user" | gzip > "$backup_file"
+              export PGPASSWORD="$db_pass"
+              pg_dumpall -h "$db_host" -p "$db_port" -U "$db_user" 2>"$TEMP_LOG" | gzip > "$backup_file"
+              unset PGPASSWORD
               ;;
           esac
-          if [ $? -eq 0 ]; then
-            upload_backup "$backup_file" "$target_path" "$username" "$password" && \
-            echo -e "\033[32m✔ 所有数据库备份成功\033[0m" || \
-            echo -e "\033[31m✗ 备份失败\033[0m"
-          else
-            echo -e "\033[31m✗ 备份失败，请检查数据库配置\033[0m"
-            log "所有数据库备份失败"
-            rm -f "$backup_file"
+          if [ $? -ne 0 ]; then
+            echo -e "\033[31m✗ 备份失败：\033[0m"
+            cat "$TEMP_LOG"
+            log "备份所有数据库失败: $(cat "$TEMP_LOG")"
+            rm -f "$TEMP_LOG" "$backup_file"
+            continue
           fi
+          upload_backup "$backup_file" "$target_path" "$username" "$password" && \
+          echo -e "\033[32m✔ 所有数据库备份成功\033[0m" || \
+          echo -e "\033[31m✗ 备份失败，请查看日志\033[0m"
         else
           for db_name in $db_list; do
             backup_file="/tmp/${db_name}_$timestamp.sql.gz"
             case "$db_type" in
               mysql)
                 echo -e "\033[36m正在备份 MySQL 数据库 $db_name...\033[0m"
-                mysqldump -u "$db_user" -p"$db_pass" "$db_name" | gzip > "$backup_file"
+                mysqldump -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" "$db_name" 2>"$TEMP_LOG" | gzip > "$backup_file"
                 ;;
               postgres)
                 echo -e "\033[36m正在备份 PostgreSQL 数据库 $db_name...\033[0m"
-                pg_dump -U "$db_user" "$db_name" | gzip > "$backup_file"
+                export PGPASSWORD="$db_pass"
+                pg_dump -h "$db_host" -p "$db_port" -U "$db_user" "$db_name" 2>"$TEMP_LOG" | gzip > "$backup_file"
+                unset PGPASSWORD
                 ;;
             esac
-            if [ $? -eq 0 ]; then
-              upload_backup "$backup_file" "$target_path" "$username" "$password" && \
-              echo -e "\033[32m✔ 数据库 $db_name 备份成功\033[0m" || \
-              echo -e "\033[31m✗ 备份 $db_name 失败\033[0m"
-            else
-              echo -e "\033[31m✗ 备份 $db_name 失败，请检查数据库配置\033[0m"
-              log "数据库 $db_name 备份失败"
-              rm -f "$backup_file"
+            if [ $? -ne 0 ]; then
+              echo -e "\033[31m✗ 备份 $db_name 失败：\033[0m"
+              cat "$TEMP_LOG"
+              log "备份数据库 $db_name 失败: $(cat "$TEMP_LOG")"
+              rm -f "$TEMP_LOG" "$backup_file"
+              continue
             fi
+            upload_backup "$backup_file" "$target_path" "$username" "$password" && \
+            echo -e "\033[32m✔ 数据库 $db_name 备份成功\033[0m" || \
+            echo -e "\033[31m✗ 备份 $db_name 失败，请查看日志\033[0m"
           done
         fi
+        rm -f "$TEMP_LOG"
         ;;
       3)
         echo -e "\033[36m▶ 设置备份计划任务...\033[0m"
@@ -690,41 +875,100 @@ backup_menu() {
             echo -e "\033[31m✗ 源路径不存在\033[0m"
             continue
           fi
+          read -p "请输入目标路径 (例如 /backup 或 sftp://example.com): " target_path
+          read -p "请输入用户名（本地备份留空）: " username
+          if [ -n "$username" ]; then
+            read -s -p "请输入密码（或 SSH 密钥路径）: " password
+            echo
+          fi
         elif [ "$backup_type" = "2" ]; then
-          read -p "请输入数据库类型 (mysql/postgres): " db_type
-          case "$db_type" in
-            mysql)
-              if ! command -v mysqldump >/dev/null 2>&1; then
-                echo -e "\033[31m✗ mysqldump 未安装，请安装：sudo apt-get install mysql-client\033[0m"
-                continue
-              fi
-              ;;
-            postgres)
-              if ! command -v pg_dump >/dev/null 2>&1; then
-                echo -e "\033[31m✗ pg_dump 未安装，请安装：sudo apt-get install postgresql-client\033[0m"
-                continue
-              fi
-              ;;
-            *)
-              echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+          if load_config; then
+            db_type=$DB_TYPE
+            db_host=$DB_HOST
+            db_port=$DB_PORT
+            db_user=$DB_USER
+            db_pass=$DB_PASS
+            target_path=$TARGET_PATH
+            username=$TARGET_USER
+            password=$TARGET_PASS
+            echo -e "\033[32m✔ 已从配置文件加载参数\033[0m"
+          else
+            read -p "是否创建配置文件？(y/N): " create_choice
+            if [ "$create_choice" = "y" ] || [ "$create_choice" = "Y" ]; then
+              create_config
+              echo "请编辑 $CONFIG_FILE 并重新运行脚本"
               continue
-              ;;
-          esac
-          read -p "请输入数据库用户: " db_user
-          read -s -p "请输入数据库密码: " db_pass
-          echo
+            fi
+            read -p "请输入数据库类型 (mysql/postgres): " db_type
+            case "$db_type" in
+              mysql|postgres)
+                install_db_client "$db_type" || continue
+                ;;
+              *)
+                echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+                continue
+                ;;
+            esac
+            read -p "请输入数据库主机名 (默认 localhost): " db_host
+            db_host=${db_host:-localhost}
+            read -p "请输入数据库端口 (默认 3306 for MySQL, 5432 for PostgreSQL): " db_port
+            db_port=${db_port:-$( [ "$db_type" = "mysql" ] && echo 3306 || echo 5432 )}
+            read -p "请输入数据库用户: " db_user
+            read -s -p "请输入数据库密码: " db_pass
+            echo
+            read -p "请输入目标路径 (例如 /backup 或 sftp://example.com): " target_path
+            read -p "请输入用户名（本地备份留空）: " username
+            if [ -n "$username" ]; then
+              read -s -p "请输入密码（或 SSH 密钥路径）: " password
+              echo
+            fi
+          fi
+          echo -e "\033[36m正在测试数据库连接...\033[0m"
+          if [ "$db_type" = "mysql" ]; then
+            mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" >"$TEMP_LOG" 2>&1
+            if [ $? -ne 0 ]; then
+              echo -e "\033[31m✗ 数据库连接失败：\033[0m"
+              cat "$TEMP_LOG"
+              log "MySQL 连接失败: $(cat "$TEMP_LOG")"
+              rm -f "$TEMP_LOG"
+              continue
+            fi
+          elif [ "$db_type" = "postgres" ]; then
+            export PGPASSWORD="$db_pass"
+            psql -h "$db_host" -p "$db_port" -U "$db_user" -d "postgres" -c "SELECT 1;" >"$TEMP_LOG" 2>&1
+            if [ $? -ne 0 ]; then
+              echo -e "\033[31m✗ 数据库连接失败：\033[0m"
+              cat "$TEMP_LOG"
+              log "PostgreSQL 连接失败: $(cat "$TEMP_LOG")"
+              rm -f "$TEMP_LOG"
+              unset PGPASSWORD
+              continue
+            fi
+            unset PGPASSWORD
+          fi
+          echo -e "\033[32m✔ 数据库连接成功\033[0m"
+          rm -f "$TEMP_LOG"
           read -p "是否备份所有数据库？(y/N): " all_dbs
           if [ "$all_dbs" = "y" ] || [ "$all_dbs" = "Y" ]; then
             db_list="all"
           else
             echo -e "\033[36m正在获取数据库列表...\033[0m"
             if [ "$db_type" = "mysql" ]; then
-              db_list=$(mysql -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
+              db_list=$(mysql -h "$db_host" -P "$db_port" -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>"$TEMP_LOG" | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
             elif [ "$db_type" = "postgres" ]; then
-              db_list=$(psql -U "$db_user" -lqt 2>/dev/null | cut -d'|' -f1 | grep -v "template" | grep -v "postgres" | sed 's/ //g')
+              export PGPASSWORD="$db_pass"
+              db_list=$(psql -h "$db_host" -p "$db_port" -U "$db_user" -d "postgres" -t -c "SELECT datname FROM pg_database WHERE datistemplate = false;" 2>"$TEMP_LOG" | sed 's/ //g')
+              unset PGPASSWORD
+              if [ -s "$TEMP_LOG" ]; then
+                echo -e "\033[31m✗ 获取数据库列表失败：\033[0m"
+                cat "$TEMP_LOG"
+                log "获取数据库列表失败: $(cat "$TEMP_LOG")"
+                rm -f "$TEMP_LOG"
+                continue
+              fi
             fi
             if [ -z "$db_list" ]; then
-              echo -e "\033[31m✗ 获取数据库列表失败，请检查用户权限或密码\033[0m"
+              echo -e "\033[31m✗ 获取数据库列表为空，请检查用户权限或数据库配置\033[0m"
               continue
             fi
             echo -e "可用数据库：\n$db_list"
@@ -735,16 +979,16 @@ backup_menu() {
           echo -e "\033[31m✗ 无效备份类型\033[0m"
           continue
         fi
-        read -p "请输入目标路径 (例如 /backup 或 sftp://example.com): " target_path
-        read -p "请输入用户名（本地备份留空）: " username
-        if [ -n "$username" ]; then
-          read -s -p "请输入密码（或 SSH 密钥路径）: " password
-          echo
-        fi
-        read -p "请输入每周运行的天数 (0-6 0=周日): " day
+        echo -e "\033[36m设置备份频率：\033[0m"
+        echo "  * 表示每天，*/2 表示隔天，0-6 表示特定星期几，1,3,5 表示周一、三、五"
+        read -p "请输入 cron 星期字段: " cron_day
         read -p "请输入运行时间 (0-23): " hour
-        if [[ ! $day =~ ^[0-6]$ ]] || [[ ! $hour =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
-          echo -e "\033[31m✗ 无效时间输入\033[0m"
+        if [[ ! $hour =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
+          echo -e "\033[31m✗ 无效时间输入，必须是 0-23 之间的整数\033[0m"
+          continue
+        fi
+        if [[ "$cron_day" != "*" && "$cron_day" != "*/2" && ! "$cron_day" =~ ^([0-6](,[0-6])*)$ ]]; then
+          echo -e "\033[31m✗ 无效星期字段，请输入 *、*/2 或 0-6 的数字（可用逗号分隔）\033[0m"
           continue
         fi
         cron_cmd=""
@@ -768,9 +1012,9 @@ EOF && rm -f /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz'"
         elif [ "$backup_type" = "2" ]; then
           if [ "$db_list" = "all" ]; then
             if [ "$db_type" = "mysql" ]; then
-              cron_cmd="bash -c 'mysqldump -u $db_user -p$db_pass --all-databases | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+              cron_cmd="bash -c 'mysqldump -h $db_host -P $db_port -u $db_user -p$db_pass --all-databases | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
             elif [ "$db_type" = "postgres" ]; then
-              cron_cmd="bash -c 'pg_dumpall -U $db_user | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+              cron_cmd="bash -c 'PGPASSWORD=$db_pass pg_dumpall -h $db_host -p $db_port -U $db_user | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
             fi
             if [[ "$target_path" =~ ^http ]]; then
               cron_cmd+="curl -u $username:$password -T /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
@@ -781,7 +1025,7 @@ put /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz all_dbs_\$(date +\%Y\%m\%d
 bye
 EOF && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
             elif [[ "$target_path" =~ ^sftp ]]; then
-              cron_cmd+="echo \"put /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - -i $password $username@${target_path#sftp://} && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+              cron_cmd+="echo \"put /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - $username@${target_path#sftp://} && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
             elif [[ "$target_path" =~ ^rsync ]]; then
               cron_cmd+="rsync -e \"ssh -i $password\" /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $username@${target_path#rsync://}:all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
             else
@@ -790,9 +1034,9 @@ EOF && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
           else
             for db_name in $db_list; do
               if [ "$db_type" = "mysql" ]; then
-                cron_cmd="bash -c 'mysqldump -u $db_user -p$db_pass $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+                cron_cmd="bash -c 'mysqldump -h $db_host -P $db_port -u $db_user -p$db_pass $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
               elif [ "$db_type" = "postgres" ]; then
-                cron_cmd="bash -c 'pg_dump -U $db_user $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+                cron_cmd="bash -c 'PGPASSWORD=$db_pass pg_dump -h $db_host -p $db_port -U $db_user $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
               fi
               if [[ "$target_path" =~ ^http ]]; then
                 cron_cmd+="curl -u $username:$password -T /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
@@ -803,27 +1047,29 @@ put /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz ${db_name}_\$(date +\%Y
 bye
 EOF && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
               elif [[ "$target_path" =~ ^sftp ]]; then
-                cron_cmd+="echo \"put /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz ${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - -i $password $username@${target_path#sftp://} && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+                cron_cmd+="echo \"put /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz ${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - $username@${target_path#sftp://} && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
               elif [[ "$target_path" =~ ^rsync ]]; then
                 cron_cmd+="rsync -e \"ssh -i $password\" /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $username@${target_path#rsync://}:${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
               else
                 cron_cmd+="mkdir -p $target_path && mv /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/'"
               fi
-              echo "0 $hour * * $day root $cron_cmd" >> "$BACKUP_CRON"
+              echo "0 $hour * * $cron_day root $cron_cmd" >> "$BACKUP_CRON"
             done
             chmod 644 "$BACKUP_CRON"
             echo -e "\033[32m✔ 备份计划任务设置成功\033[0m"
-            log "备份计划任务设置成功: 每周 $day 的 $hour:00"
+            log "备份计划任务设置成功: 星期字段 $cron_day 的 $hour:00"
             continue
           fi
         fi
-        echo "0 $hour * * $day root $cron_cmd" > "$BACKUP_CRON"
+        echo "0 $hour * * $cron_day root $cron_cmd" > "$BACKUP_CRON"
         chmod 644 "$BACKUP_CRON"
         echo -e "\033[32m✔ 备份计划任务设置成功\033[0m"
-        log "备份计划任务设置成功: 每周 $day 的 $hour:00"
+        log "备份计划任务设置成功: 星期字段 $cron_day 的 $hour:00"
         ;;
       4) return ;;
-      *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
+      *)
+        echo -e "\033[31m无效选项，请输入 1-4\033[0m"
+        ;;
     esac
     read -p "按回车继续..."
   done
