@@ -1,4 +1,8 @@
 #!/bin/bash
+# 脚本名称：setup_optimize_server.sh
+# 作者：cristsau
+# 版本：5.0
+# 功能：服务器优化管理工具
 
 if [ "$(id -u)" -ne 0 ]; then
   echo -e "\033[31m✗ 请使用 root 权限运行此脚本\033[0m"
@@ -548,6 +552,94 @@ upload_backup() {
     check_backup_tools "$protocol" || return 1
   fi
 
+  # 在上传前清理远端旧备份文件
+  case $protocol in
+    webdav)
+      echo -e "\033[36m正在清理 WebDAV 旧备份...\033[0m"
+      # 获取远端文件列表
+      curl -u "$username:$password" -X PROPFIND "${target%/}" -H "Depth: 1" >"$TEMP_LOG" 2>&1
+      if [ $? -eq 0 ]; then
+        # 提取所有备份文件路径，修复大小写并兼容非 Perl grep
+        if command -v grep >/dev/null 2>&1 && grep -P "" /dev/null >/dev/null 2>&1; then
+          all_files=$(grep -oP '(?<=<D:href>).*?(?=</D:href>)' "$TEMP_LOG" | grep -E '\.(tar\.gz|sql\.gz)$')
+        else
+          all_files=$(grep '<D:href>' "$TEMP_LOG" | sed 's|.*<D:href>\(.*\)</D:href>.*|\1|' | grep -E '\.(tar\.gz|sql\.gz)$')
+        fi
+        echo -e "\033[33m调试：提取的所有备份文件路径：\033[0m"
+        echo "$all_files"
+        log "WebDAV 提取的所有备份文件路径: $all_files"
+
+        # 提取文件名并排除新文件
+        old_files=$(echo "$all_files" | sed 's|.*/||' | grep -v "^${filename}$")
+        echo -e "\033[33m调试：旧备份文件列表（old_files）：\033[0m"
+        echo "$old_files"
+        log "WebDAV 旧备份文件列表: $old_files"
+
+        if [ -n "$old_files" ]; then
+          for old_file in $old_files; do
+            delete_url="${target%/}/${old_file}"
+            curl -u "$username:$password" -X DELETE "$delete_url" >"$TEMP_LOG" 2>&1
+            if [ $? -eq 0 ]; then
+              echo -e "\033[32m✔ 删除旧文件: $delete_url\033[0m"
+              log "WebDAV 旧备份删除成功: $delete_url"
+            else
+              echo -e "\033[31m✗ 删除旧文件失败: $delete_url\033[0m"
+              echo "服务器响应："
+              cat "$TEMP_LOG"
+              log "WebDAV 旧备份删除失败: $(cat "$TEMP_LOG")"
+            fi
+          done
+        else
+          echo -e "\033[32m✔ 无旧备份需要清理\033[0m"
+          log "WebDAV 无旧备份需要清理"
+        fi
+      else
+        echo -e "\033[31m✗ 无法获取 WebDAV 文件列表\033[0m"
+        echo "服务器响应："
+        cat "$TEMP_LOG"
+        log "WebDAV 获取文件列表失败: $(cat "$TEMP_LOG")"
+      fi
+      rm -f "$TEMP_LOG"
+      ;;
+    sftp)
+      echo -e "\033[36m正在清理 SFTP 旧备份...\033[0m"
+      echo "ls" | sftp -b - "$username@${target#sftp://}" >"$TEMP_LOG" 2>&1
+      if [ $? -eq 0 ]; then
+        old_files=$(grep -v "$filename" "$TEMP_LOG" | grep -E '\.(tar\.gz|sql\.gz)$')
+        for old_file in $old_files; do
+          echo "rm $old_file" | sftp -b - "$username@${target#sftp://}" >/dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo -e "\033[32m✔ 删除旧文件: $old_file\033[0m"
+            log "SFTP 旧备份删除成功: $old_file"
+          else
+            echo -e "\033[33m⚠ 删除旧文件失败: $old_file\033[0m"
+            log "SFTP 旧备份删除失败: $old_file"
+          fi
+        done
+      else
+        echo -e "\033[33m⚠ 无法获取 SFTP 文件列表，跳过清理\033[0m"
+        log "SFTP 获取文件列表失败: $(cat "$TEMP_LOG")"
+      fi
+      rm -f "$TEMP_LOG"
+      ;;
+    ftp|rsync)
+      echo -e "\033[33m⚠ $protocol 暂不支持自动清理旧备份，请手动管理远端文件\033[0m"
+      log "$protocol 不支持自动清理旧备份"
+      ;;
+    local)
+      echo -e "\033[36m正在清理本地旧备份...\033[0m"
+      find "$target" -type f \( -name "*.tar.gz" -o -name "*.sql.gz" \) -not -name "$filename" -exec rm -f {} \;
+      if [ $? -eq 0 ]; then
+        echo -e "\033[32m✔ 本地旧备份清理成功\033[0m"
+        log "本地旧备份清理成功"
+      else
+        echo -e "\033[33m⚠ 本地旧备份清理失败\033[0m"
+        log "本地旧备份清理失败"
+      fi
+      ;;
+  esac
+
+  # 上传新备份
   case $protocol in
     webdav)
       echo -e "\033[36m正在上传到 WebDAV: $url...\033[0m"
