@@ -1,7 +1,7 @@
 #!/bin/bash
 # 脚本名称：setup_optimize_server.sh
 # 作者：cristsau
-# 版本：5.0
+# 版本：5.1
 # 功能：服务器优化管理工具
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -64,22 +64,40 @@ load_config() {
 
 create_config() {
   echo -e "\033[36m▶ 创建备份配置文件...\033[0m"
+  read -p "请输入数据库类型 (mysql/postgres): " DB_TYPE
+  read -p "请输入数据库主机: " DB_HOST
+  read -p "请输入数据库端口: " DB_PORT
+  read -p "请输入数据库用户: " DB_USER
+  read -s -p "请输入数据库密码: " DB_PASS
+  echo
+  read -p "请输入备份目标路径: " TARGET_PATH
+  read -p "请输入备份目标用户: " TARGET_USER
+  read -s -p "请输入备份目标密码: " TARGET_PASS
+  echo
+
+  # 检查必填项是否为空
+  if [ -z "$DB_TYPE" ] || [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASS" ] || [ -z "$TARGET_PATH" ] || [ -z "$TARGET_USER" ] || [ -z "$TARGET_PASS" ]; then
+    echo -e "\033[31m✗ 所有字段均为必填，请重新输入\033[0m"
+    create_config  # 递归调用，直到所有字段都填写
+    return
+  fi
+
+  # 将输入保存到配置文件
   cat <<EOF > "$CONFIG_FILE"
 # 数据库配置
-DB_TYPE=postgres
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASS=
+DB_TYPE="$DB_TYPE"
+DB_HOST="$DB_HOST"
+DB_PORT="$DB_PORT"
+DB_USER="$DB_USER"
+DB_PASS="$DB_PASS"
 
 # 备份目标配置
-TARGET_PATH=https://nas.cvv.gr/dav/CrisTsau/local/backup/lobechat/postgres
-TARGET_USER=cristsau
-TARGET_PASS=
+TARGET_PATH="$TARGET_PATH"
+TARGET_USER="$TARGET_USER"
+TARGET_PASS="$TARGET_PASS"
 EOF
   chmod 600 "$CONFIG_FILE"
-  echo -e "\033[32m✔ 配置文件已创建: $CONFIG_FILE\033[0m"
-  echo "请编辑 $CONFIG_FILE 并填入正确的密码"
+  echo -e "\033[32m✔ 配置文件 $CONFIG_FILE 创建成功\033[0m"
   log "配置文件创建成功: $CONFIG_FILE"
 }
 
