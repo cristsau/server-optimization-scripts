@@ -2,7 +2,7 @@
 
 # 脚本名称：setup_optimize_server.sh
 # 作者：cristsau
-# 版本：3.5
+# 版本：3.8
 # 功能：服务器优化管理工具
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -14,6 +14,8 @@ SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
 TEMP_LOG="/tmp/optimize_temp.log"
+CURRENT_VERSION="3.8"  # 当前脚本版本
+BACKUP_CRON="/etc/cron.d/backup_cron"
 
 log() {
   local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -48,7 +50,7 @@ manage_cron() {
     cron_hr="$1"
     cron_day="$2"
     (crontab -l 2>/dev/null; echo "$cron_min $cron_hr * * $cron_day $SCRIPT_PATH") | crontab -
-    log "已设置计划任务：每周 $cron_day 的 $cron_hr:00"
+    log "已设置优化任务：每周 $cron_day 的 $cron_hr:00"
   fi
 }
 
@@ -271,8 +273,43 @@ view_status() {
     return 1
   fi
 
+  echo -e "\n\033[36m▌ 脚本配置信息 ▍\033[0m"
+  echo "当前脚本版本: $CURRENT_VERSION"
+  echo "优化脚本路径: $SCRIPT_PATH"
+  echo "日志文件路径: $LOG_FILE"
+  echo "日志文件大小: $(du -h "$LOG_FILE" | cut -f1 2>/dev/null || echo '未知')"
+
+  echo -e "\n\033[36m▌ 所有计划任务 ▍\033[0m"
+  echo -e "优化任务："
+  cron_job=$(crontab -l 2>/dev/null | grep "$SCRIPT_PATH")
+  if [ -n "$cron_job" ]; then
+    cron_min=$(echo "$cron_job" | awk '{print $1}')
+    cron_hr=$(echo "$cron_job" | awk '{print $2}')
+    cron_day_num=$(echo "$cron_job" | awk '{print $5}')
+    cron_day=$(convert_weekday "$cron_day_num")
+    printf "  每周 星期%s %02d:%02d 执行 $SCRIPT_PATH\n" "$cron_day" "$cron_hr" "$cron_min"
+  else
+    echo -e "  \033[33m未设置优化任务\033[0m"
+  fi
+
+  echo -e "备份任务："
+  if [ -f "$BACKUP_CRON" ]; then
+    cat "$BACKUP_CRON" | while read -r line; do
+      if [[ "$line" =~ ^[0-9] ]]; then
+        cron_min=$(echo "$line" | awk '{print $1}')
+        cron_hr=$(echo "$line" | awk '{print $2}')
+        cron_day_num=$(echo "$line" | awk '{print $5}')
+        cron_day=$(convert_weekday "$cron_day_num")
+        cron_cmd=$(echo "$line" | cut -d' ' -f6-)
+        printf "  每周 星期%s %02d:%02d 执行 %s\n" "$cron_day" "$cron_hr" "$cron_min" "$cron_cmd"
+      fi
+    done
+  else
+    echo -e "  \033[33m未设置备份任务\033[0m"
+  fi
+
   if [ ! -f "$LOG_FILE" ]; then
-    echo -e "\033[33m警告：日志文件不存在\033[0m"
+    echo -e "\n\033[33m警告：日志文件不存在\033[0m"
     return 1
   fi
 
@@ -281,64 +318,27 @@ view_status() {
   start_time=$(echo "$start_line" | awk '{print $1 " " $2}')
   end_time=$(echo "$end_line" | awk '{print $1 " " $2}')
 
-  echo -e "\n🕒 最近一次执行详情："
-  echo "   • 日志文件路径: $LOG_FILE"
-  echo "   • 日志文件大小: $(du -h "$LOG_FILE" | cut -f1)"
+  echo -e "\n\033[36m▌ 最近一次优化任务详情 ▍\033[0m"
   if [[ -n "$start_time" && -n "$end_time" ]]; then
-    echo "   • 开始时间: $start_time"
-    echo "   • 结束时间: $end_time"
+    echo "开始时间: $start_time"
+    echo "结束时间: $end_time"
     start_seconds=$(date -d "$start_time" +%s 2>/dev/null)
     end_seconds=$(date -d "$end_time" +%s 2>/dev/null)
     if [[ -n "$start_seconds" && -n "$end_seconds" ]]; then
       duration=$((end_seconds - start_seconds))
-      echo "   • 执行时长: $duration 秒"
+      echo "执行时长: $duration 秒"
     else
-      echo "   • 执行时长: \033[33m无法计算\033[0m"
+      echo "执行时长: \033[33m无法计算\033[0m"
     fi
-    echo -e "   • 上一次执行的任务："
+    echo -e "执行的任务："
     sed -n "/$start_time - === 优化任务开始 ===/,/$end_time - === 优化任务结束 ===/p" "$LOG_FILE" | grep -v "调试" | grep -v "===" | while read -r line; do
       task=$(echo "$line" | sed 's/^[0-9-]\+ [0-9:]\+ - //')
       if [[ "$task" =~ "完成" || "$task" =~ "没有" || "$task" =~ "清理" ]]; then
-        echo "     ✔ $task"
+        echo "  ✔ $task"
       fi
     done
   else
-    echo -e "   • \033[33m未找到完整的执行记录\033[0m"
-  fi
-
-  cron_job=$(crontab -l 2>/dev/null | grep "$SCRIPT_PATH")
-  if [ -n "$cron_job" ]; then
-    cron_min=$(echo "$cron_job" | awk '{print $1}')
-    cron_hr=$(echo "$cron_job" | awk '{print $2}')
-    cron_day_num=$(echo "$cron_job" | awk '{print $5}')
-    cron_day=$(convert_weekday "$cron_day_num")
-    echo -e "\n当前计划任务："
-    printf "  每周 星期%s %02d:%02d\n" "$cron_day" "$cron_hr" "$cron_min"
-    current_day=$(date +%w)
-    current_hour=$(date +%H | sed 's/^0//')
-    current_min=$(date +%M | sed 's/^0//')
-    if [[ $current_day -lt $cron_day_num ]] || \
-       ([[ $current_day -eq $cron_day_num ]] && [[ $current_hour -lt $cron_hr ]]) || \
-       ([[ $current_day -eq $cron_day_num ]] && [[ $current_hour -eq $cron_hr ]] && [[ $current_min -lt $cron_min ]]); then
-      days_until=$((cron_day_num - current_day))
-    else
-      days_until=$((7 - current_day + cron_day_num))
-    fi
-    next_run=$(date -d "+$days_until days $cron_hr:$cron_min" "+%Y-%m-%d %H:%M")
-    echo -e "下次执行时间：\n  $next_run"
-    echo -e "\n下次执行任务："
-    echo "  ✔ 检查必要的工具和服务"
-    echo "  ✔ 配置脚本日志轮转"
-    echo "  ✔ 配置系统日志轮转"
-    echo "  ✔ 清理超过15天的旧系统日志"
-    echo "  ✔ 配置 Docker 日志轮转"
-    echo "  ✔ 清理 Docker 容器日志"
-    echo "  ✔ 清理 APT 缓存"
-    echo "  ✔ 清理旧内核版本"
-    echo "  ✔ 清理 /tmp 目录"
-    echo "  ✔ 清理用户缓存"
-  else
-    echo -e "当前计划任务：\033[33m未设置\033[0m"
+    echo -e "\033[33m未找到完整的优化任务记录\033[0m"
   fi
 
   echo -e "\033[34m▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\033[0m"
@@ -361,11 +361,472 @@ install_alias() {
 uninstall() {
   echo -e "\033[31m▶ 开始卸载...\033[0m"
   manage_cron
-  log "计划任务已移除"
+  [ -f "$BACKUP_CRON" ] && rm -v "$BACKUP_CRON"
+  log "所有计划任务已移除"
   [ -f "$SCRIPT_PATH" ] && rm -v "$SCRIPT_PATH"
   [ -f "/usr/local/bin/cristsau" ] && rm -v "/usr/local/bin/cristsau"
   echo -e "\n\033[33m⚠ 日志文件仍保留在：$LOG_FILE\033[0m"
   echo -e "\033[31m✔ 卸载完成\033[0m"
+}
+
+update_from_github() {
+  echo -e "\033[36m▶ 从 GitHub 更新脚本...\033[0m"
+  TARGET_DIR="/root/data/cristsau/optimize_server"
+  TARGET_PATH="$TARGET_DIR/setup_optimize_server.sh"
+  GITHUB_URL="https://raw.githubusercontent.com/cristsau/server-optimization-scripts/main/setup_optimize_server.sh"
+  TEMP_FILE="/tmp/setup_optimize_server.sh.tmp"
+
+  if ! wget -O "$TEMP_FILE" "$GITHUB_URL" >/dev/null 2>&1; then
+    echo -e "\033[31m✗ 下载失败，请检查网络或 GitHub 地址\033[0m"
+    rm -f "$TEMP_FILE"
+    return 1
+  fi
+
+  LATEST_VERSION=$(grep -m 1 "版本：" "$TEMP_FILE" | awk '{print $NF}')
+  echo -e "当前版本: $CURRENT_VERSION"
+  echo -e "最新版本: $LATEST_VERSION"
+
+  if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+    echo -e "\033[32m✔ 当前已是最新版本\033[0m"
+    read -p "是否强制更新？(y/N): " force_update
+    if [ "$force_update" != "y" ] && [ "$force_update" != "Y" ]; then
+      rm -f "$TEMP_FILE"
+      return 0
+    fi
+  fi
+
+  mkdir -p "$TARGET_DIR"
+  mv "$TEMP_FILE" "$TARGET_PATH"
+  chmod +x "$TARGET_PATH"
+
+  echo -e "\033[36m清理系统中其他版本的 setup_optimize_server.sh...\033[0m"
+  find / -type f -name "setup_optimize_server.sh" -not -path "$TARGET_PATH" -exec rm -v {} \;
+
+  echo -e "\033[32m✔ 脚本更新成功，位置: $TARGET_PATH\033[0m"
+  echo -e "正在运行新脚本..."
+  sudo "$TARGET_PATH"
+}
+
+enable_bbr() {
+  echo -e "\033[36m▶ 正在开启 BBR...\033[0m"
+  cat > /etc/sysctl.conf << EOF
+fs.file-max = 6815744
+net.ipv4.tcp_no_metrics_save=1
+net.ipv4.tcp_ecn=0
+net.ipv4.tcp_frto=0
+net.ipv4.tcp_mtu_probing=0
+net.ipv4.tcp_rfc1337=0
+net.ipv4.tcp_sack=1
+net.ipv4.tcp_fack=1
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_adv_win_scale=1
+net.ipv4.tcp_moderate_rcvbuf=1
+net.core.rmem_max=33554432
+net.core.wmem_max=33554432
+net.ipv4.tcp_rmem=4096 87380 33554432
+net.ipv4.tcp_wmem=4096 16384 33554432
+net.ipv4.udp_rmem_min=8192
+net.ipv4.udp_wmem_min=8192
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.route_localnet=1
+net.ipv4.conf.all.forwarding=1
+net.ipv4.conf.default.forwarding=1
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv6.conf.all.forwarding=1
+net.ipv6.conf.default.forwarding=1
+EOF
+  if sysctl -p >/dev/null 2>&1 && sysctl --system >/dev/null 2>&1; then
+    echo -e "\033[32m✔ BBR 已成功开启\033[0m"
+    log "BBR 开启成功"
+  else
+    echo -e "\033[31m✗ BBR 开启失败，请检查系统配置\033[0m"
+    log "BBR 开启失败"
+  fi
+}
+
+check_backup_tools() {
+  local protocol=$1
+  case $protocol in
+    webdav)
+      if ! command -v curl >/dev/null 2>&1; then
+        echo -e "\033[31m✗ curl 未安装，请安装：sudo apt-get install curl\033[0m"
+        return 1
+      fi
+      ;;
+    ftp)
+      if ! command -v ftp >/dev/null 2>&1; then
+        echo -e "\033[31m✗ ftp 未安装，请安装：sudo apt-get install ftp\033[0m"
+        return 1
+      fi
+      ;;
+    sftp|scp)
+      if ! command -v ssh >/dev/null 2>&1; then
+        echo -e "\033[31m✗ ssh 未安装，请安装：sudo apt-get install openssh-client\033[0m"
+        return 1
+      fi
+      ;;
+    rsync)
+      if ! command -v rsync >/dev/null 2>&1; then
+        echo -e "\033[31m✗ rsync 未安装，请安装：sudo apt-get install rsync\033[0m"
+        return 1
+      fi
+      ;;
+  esac
+  return 0
+}
+
+upload_backup() {
+  local file=$1
+  local target=$2
+  local username=$3
+  local password=$4
+  local filename=$(basename "$file")
+
+  if [[ "$target" =~ ^http ]]; then
+    protocol="webdav"
+    url="${target%/}/$filename"
+  elif [[ "$target" =~ ^ftp ]]; then
+    protocol="ftp"
+    url="${target%/}/$filename"
+  elif [[ "$target" =~ ^sftp ]]; then
+    protocol="sftp"
+    url="${target%/}/$filename"
+  elif [[ "$target" =~ ^rsync ]]; then
+    protocol="rsync"
+    url="${target%/}/$filename"
+  else
+    protocol="local"
+  fi
+
+  if [ "$protocol" != "local" ]; then
+    check_backup_tools "$protocol" || return 1
+  fi
+
+  case $protocol in
+    webdav)
+      echo -e "\033[36m正在上传到 WebDAV: $url...\033[0m"
+      curl -u "$username:$password" -T "$file" "$url" >/dev/null 2>&1
+      ;;
+    ftp)
+      echo -e "\033[36m正在上传到 FTP: $url...\033[0m"
+      ftp -n "${target#ftp://}" <<EOF
+user $username $password
+put $file $filename
+bye
+EOF
+      ;;
+    sftp)
+      echo -e "\033[36m正在上传到 SFTP: $url...\033[0m"
+      echo "put $file $filename" | sftp -b - -i "$password" "$username@${target#sftp://}" >/dev/null 2>&1
+      ;;
+    scp)
+      echo -e "\033[36m正在上传到 SCP: $url...\033[0m"
+      scp -i "$password" "$file" "$username@${target#scp://}:$filename" >/dev/null 2>&1
+      ;;
+    rsync)
+      echo -e "\033[36m正在同步到 rsync: $url...\033[0m"
+      rsync -e "ssh -i $password" "$file" "$username@${target#rsync://}:$filename" >/dev/null 2>&1
+      ;;
+    local)
+      mkdir -p "$target"
+      mv "$file" "$target/$filename"
+      return 0
+      ;;
+  esac
+
+  if [ $? -eq 0 ]; then
+    echo -e "\033[32m✔ 上传成功: $url\033[0m"
+    log "备份上传成功: $url"
+    rm -f "$file"
+    return 0
+  else
+    echo -e "\033[31m✗ 上传失败，请检查配置\033[0m"
+    log "备份上传失败: $url"
+    return 1
+  fi
+}
+
+backup_menu() {
+  while true; do
+    clear
+    echo -e "\033[34m▌ 备份工具 ▍\033[0m"
+    echo -e "\033[36m"
+    echo " 1) 备份程序数据"
+    echo " 2) 备份数据库"
+    echo " 3) 设置备份计划任务"
+    echo " 4) 返回"
+    echo -e "\033[0m"
+    read -p "请输入选项 (1-4): " backup_choice
+    case $backup_choice in
+      1)
+        echo -e "\033[36m▶ 备份程序数据...\033[0m"
+        read -p "请输入源路径 (例如 /var/www): " source_path
+        read -p "请输入目标路径 (例如 /backup/data 或 http://webdav.example.com): " target_path
+        read -p "请输入用户名（本地备份留空）: " username
+        if [ -n "$username" ]; then
+          read -s -p "请输入密码（或 SSH 密钥路径）: " password
+          echo
+        fi
+        if [ ! -d "$source_path" ]; then
+          echo -e "\033[31m✗ 源路径不存在\033[0m"
+          continue
+        fi
+        timestamp=$(date '+%Y%m%d_%H%M%S')
+        backup_file="/tmp/backup_data_$timestamp.tar.gz"
+        echo -e "\033[36m正在备份 $source_path 到 $backup_file...\033[0m"
+        tar -czf "$backup_file" -C "$source_path" . 2>/dev/null
+        if [ $? -eq 0 ]; then
+          upload_backup "$backup_file" "$target_path" "$username" "$password" && \
+          echo -e "\033[32m✔ 备份成功\033[0m" || \
+          echo -e "\033[31m✗ 备份失败\033[0m"
+        else
+          echo -e "\033[31m✗ 备份失败，请检查路径或权限\033[0m"
+          log "程序数据备份失败"
+          rm -f "$backup_file"
+        fi
+        ;;
+      2)
+        echo -e "\033[36m▶ 备份数据库...\033[0m"
+        read -p "请输入数据库类型 (mysql/postgres): " db_type
+        case "$db_type" in
+          mysql)
+            if ! command -v mysqldump >/dev/null 2>&1; then
+              echo -e "\033[31m✗ mysqldump 未安装，请安装：sudo apt-get install mysql-client\033[0m"
+              continue
+            fi
+            ;;
+          postgres)
+            if ! command -v pg_dump >/dev/null 2>&1; then
+              echo -e "\033[31m✗ pg_dump 未安装，请安装：sudo apt-get install postgresql-client\033[0m"
+              continue
+            fi
+            ;;
+          *)
+            echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+            continue
+            ;;
+        esac
+        read -p "请输入数据库用户: " db_user
+        read -s -p "请输入数据库密码: " db_pass
+        echo
+        read -p "是否备份所有数据库？(y/N): " all_dbs
+        if [ "$all_dbs" = "y" ] || [ "$all_dbs" = "Y" ]; then
+          db_list="all"
+        else
+          echo -e "\033[36m正在获取数据库列表...\033[0m"
+          if [ "$db_type" = "mysql" ]; then
+            db_list=$(mysql -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
+          elif [ "$db_type" = "postgres" ]; then
+            db_list=$(psql -U "$db_user" -lqt 2>/dev/null | cut -d'|' -f1 | grep -v "template" | grep -v "postgres" | sed 's/ //g')
+          fi
+          if [ -z "$db_list" ]; then
+            echo -e "\033[31m✗ 获取数据库列表失败，请检查用户权限或密码\033[0m"
+            continue
+          fi
+          echo -e "可用数据库：\n$db_list"
+          read -p "请输入要备份的数据库名称（多个用空格分隔，或输入 all 备份所有）：" db_names
+          db_list="$db_names"
+        fi
+        read -p "请输入目标路径 (例如 /backup/db 或 sftp://example.com): " target_path
+        read -p "请输入用户名（本地备份留空）: " username
+        if [ -n "$username" ]; then
+          read -s -p "请输入密码（或 SSH 密钥路径）: " password
+          echo
+        fi
+        timestamp=$(date '+%Y%m%d_%H%M%S')
+        if [ "$db_list" = "all" ]; then
+          backup_file="/tmp/all_dbs_$timestamp.sql.gz"
+          case "$db_type" in
+            mysql)
+              echo -e "\033[36m正在备份所有 MySQL 数据库...\033[0m"
+              mysqldump -u "$db_user" -p"$db_pass" --all-databases | gzip > "$backup_file"
+              ;;
+            postgres)
+              echo -e "\033[36m正在备份所有 PostgreSQL 数据库...\033[0m"
+              pg_dumpall -U "$db_user" | gzip > "$backup_file"
+              ;;
+          esac
+          if [ $? -eq 0 ]; then
+            upload_backup "$backup_file" "$target_path" "$username" "$password" && \
+            echo -e "\033[32m✔ 所有数据库备份成功\033[0m" || \
+            echo -e "\033[31m✗ 备份失败\033[0m"
+          else
+            echo -e "\033[31m✗ 备份失败，请检查数据库配置\033[0m"
+            log "所有数据库备份失败"
+            rm -f "$backup_file"
+          fi
+        else
+          for db_name in $db_list; do
+            backup_file="/tmp/${db_name}_$timestamp.sql.gz"
+            case "$db_type" in
+              mysql)
+                echo -e "\033[36m正在备份 MySQL 数据库 $db_name...\033[0m"
+                mysqldump -u "$db_user" -p"$db_pass" "$db_name" | gzip > "$backup_file"
+                ;;
+              postgres)
+                echo -e "\033[36m正在备份 PostgreSQL 数据库 $db_name...\033[0m"
+                pg_dump -U "$db_user" "$db_name" | gzip > "$backup_file"
+                ;;
+            esac
+            if [ $? -eq 0 ]; then
+              upload_backup "$backup_file" "$target_path" "$username" "$password" && \
+              echo -e "\033[32m✔ 数据库 $db_name 备份成功\033[0m" || \
+              echo -e "\033[31m✗ 备份 $db_name 失败\033[0m"
+            else
+              echo -e "\033[31m✗ 备份 $db_name 失败，请检查数据库配置\033[0m"
+              log "数据库 $db_name 备份失败"
+              rm -f "$backup_file"
+            fi
+          done
+        fi
+        ;;
+      3)
+        echo -e "\033[36m▶ 设置备份计划任务...\033[0m"
+        read -p "请输入备份类型 (1: 程序数据, 2: 数据库): " backup_type
+        if [ "$backup_type" = "1" ]; then
+          read -p "请输入源路径 (例如 /var/www): " source_path
+          if [ ! -d "$source_path" ]; then
+            echo -e "\033[31m✗ 源路径不存在\033[0m"
+            continue
+          fi
+        elif [ "$backup_type" = "2" ]; then
+          read -p "请输入数据库类型 (mysql/postgres): " db_type
+          case "$db_type" in
+            mysql)
+              if ! command -v mysqldump >/dev/null 2>&1; then
+                echo -e "\033[31m✗ mysqldump 未安装，请安装：sudo apt-get install mysql-client\033[0m"
+                continue
+              fi
+              ;;
+            postgres)
+              if ! command -v pg_dump >/dev/null 2>&1; then
+                echo -e "\033[31m✗ pg_dump 未安装，请安装：sudo apt-get install postgresql-client\033[0m"
+                continue
+              fi
+              ;;
+            *)
+              echo -e "\033[31m✗ 不支持的数据库类型\033[0m"
+              continue
+              ;;
+          esac
+          read -p "请输入数据库用户: " db_user
+          read -s -p "请输入数据库密码: " db_pass
+          echo
+          read -p "是否备份所有数据库？(y/N): " all_dbs
+          if [ "$all_dbs" = "y" ] || [ "$all_dbs" = "Y" ]; then
+            db_list="all"
+          else
+            echo -e "\033[36m正在获取数据库列表...\033[0m"
+            if [ "$db_type" = "mysql" ]; then
+              db_list=$(mysql -u "$db_user" -p"$db_pass" -e "SHOW DATABASES;" 2>/dev/null | grep -v "Database" | grep -v "information_schema" | grep -v "performance_schema" | grep -v "mysql" | grep -v "sys")
+            elif [ "$db_type" = "postgres" ]; then
+              db_list=$(psql -U "$db_user" -lqt 2>/dev/null | cut -d'|' -f1 | grep -v "template" | grep -v "postgres" | sed 's/ //g')
+            fi
+            if [ -z "$db_list" ]; then
+              echo -e "\033[31m✗ 获取数据库列表失败，请检查用户权限或密码\033[0m"
+              continue
+            fi
+            echo -e "可用数据库：\n$db_list"
+            read -p "请输入要备份的数据库名称（多个用空格分隔，或输入 all 备份所有）：" db_names
+            db_list="$db_names"
+          fi
+        else
+          echo -e "\033[31m✗ 无效备份类型\033[0m"
+          continue
+        fi
+        read -p "请输入目标路径 (例如 /backup 或 sftp://example.com): " target_path
+        read -p "请输入用户名（本地备份留空）: " username
+        if [ -n "$username" ]; then
+          read -s -p "请输入密码（或 SSH 密钥路径）: " password
+          echo
+        fi
+        read -p "请输入每周运行的天数 (0-6 0=周日): " day
+        read -p "请输入运行时间 (0-23): " hour
+        if [[ ! $day =~ ^[0-6]$ ]] || [[ ! $hour =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then
+          echo -e "\033[31m✗ 无效时间输入\033[0m"
+          continue
+        fi
+        cron_cmd=""
+        if [ "$backup_type" = "1" ]; then
+          cron_cmd="bash -c 'tar -czf /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz -C $source_path . && "
+          if [[ "$target_path" =~ ^http ]]; then
+            cron_cmd+="curl -u $username:$password -T /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz $target_path/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz && rm -f /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz'"
+          elif [[ "$target_path" =~ ^ftp ]]; then
+            cron_cmd+="ftp -n ${target_path#ftp://} <<EOF
+user $username $password
+put /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz
+bye
+EOF && rm -f /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz'"
+          elif [[ "$target_path" =~ ^sftp ]]; then
+            cron_cmd+="echo \"put /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz\" | sftp -b - -i $password $username@${target_path#sftp://} && rm -f /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz'"
+          elif [[ "$target_path" =~ ^rsync ]]; then
+            cron_cmd+="rsync -e \"ssh -i $password\" /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz $username@${target_path#rsync://}:backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz && rm -f /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz'"
+          else
+            cron_cmd+="mkdir -p $target_path && mv /tmp/backup_data_\$(date +\%Y\%m\%d_\%H\%M\%S).tar.gz $target_path/'"
+          fi
+        elif [ "$backup_type" = "2" ]; then
+          if [ "$db_list" = "all" ]; then
+            if [ "$db_type" = "mysql" ]; then
+              cron_cmd="bash -c 'mysqldump -u $db_user -p$db_pass --all-databases | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+            elif [ "$db_type" = "postgres" ]; then
+              cron_cmd="bash -c 'pg_dumpall -U $db_user | gzip > /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+            fi
+            if [[ "$target_path" =~ ^http ]]; then
+              cron_cmd+="curl -u $username:$password -T /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+            elif [[ "$target_path" =~ ^ftp ]]; then
+              cron_cmd+="ftp -n ${target_path#ftp://} <<EOF
+user $username $password
+put /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz
+bye
+EOF && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+            elif [[ "$target_path" =~ ^sftp ]]; then
+              cron_cmd+="echo \"put /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - -i $password $username@${target_path#sftp://} && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+            elif [[ "$target_path" =~ ^rsync ]]; then
+              cron_cmd+="rsync -e \"ssh -i $password\" /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $username@${target_path#rsync://}:all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+            else
+              cron_cmd+="mkdir -p $target_path && mv /tmp/all_dbs_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/'"
+            fi
+          else
+            for db_name in $db_list; do
+              if [ "$db_type" = "mysql" ]; then
+                cron_cmd="bash -c 'mysqldump -u $db_user -p$db_pass $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+              elif [ "$db_type" = "postgres" ]; then
+                cron_cmd="bash -c 'pg_dump -U $db_user $db_name | gzip > /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && "
+              fi
+              if [[ "$target_path" =~ ^http ]]; then
+                cron_cmd+="curl -u $username:$password -T /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+              elif [[ "$target_path" =~ ^ftp ]]; then
+                cron_cmd+="ftp -n ${target_path#ftp://} <<EOF
+user $username $password
+put /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz ${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz
+bye
+EOF && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+              elif [[ "$target_path" =~ ^sftp ]]; then
+                cron_cmd+="echo \"put /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz ${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz\" | sftp -b - -i $password $username@${target_path#sftp://} && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+              elif [[ "$target_path" =~ ^rsync ]]; then
+                cron_cmd+="rsync -e \"ssh -i $password\" /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $username@${target_path#rsync://}:${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz && rm -f /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz'"
+              else
+                cron_cmd+="mkdir -p $target_path && mv /tmp/${db_name}_\$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz $target_path/'"
+              fi
+              echo "0 $hour * * $day root $cron_cmd" >> "$BACKUP_CRON"
+            done
+            chmod 644 "$BACKUP_CRON"
+            echo -e "\033[32m✔ 备份计划任务设置成功\033[0m"
+            log "备份计划任务设置成功: 每周 $day 的 $hour:00"
+            continue
+          fi
+        fi
+        echo "0 $hour * * $day root $cron_cmd" > "$BACKUP_CRON"
+        chmod 644 "$BACKUP_CRON"
+        echo -e "\033[32m✔ 备份计划任务设置成功\033[0m"
+        log "备份计划任务设置成功: 每周 $day 的 $hour:00"
+        ;;
+      4) return ;;
+      *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
+    esac
+    read -p "按回车继续..."
+  done
 }
 
 toolbox_menu() {
@@ -375,9 +836,11 @@ toolbox_menu() {
     echo -e "\033[36m"
     echo " 1) 升级或安装最新 Docker"
     echo " 2) 同步服务器时间"
-    echo " 3) 退出"
+    echo " 3) 开启 BBR"
+    echo " 4) 备份工具"
+    echo " 5) 退出"
     echo -e "\033[0m"
-    read -p "请输入选项 (1-3): " tool_choice
+    read -p "请输入选项 (1-5): " tool_choice
     case $tool_choice in
       1)
         echo -e "\033[36m▶ 检查 Docker 状态...\033[0m"
@@ -441,7 +904,13 @@ toolbox_menu() {
           log "服务器时间同步失败"
         fi
         ;;
-      3) return ;;
+      3)
+        enable_bbr
+        ;;
+      4)
+        backup_menu
+        ;;
+      5) return ;;
       *) echo -e "\033[31m无效选项，请重新输入\033[0m" ;;
     esac
     read -p "按回车继续..."
@@ -469,31 +938,6 @@ show_menu() {
   echo " 8) 从 GitHub 更新脚本"
   echo " 9) 退出"
   echo -e "\033[0m"
-}
-
-update_from_github() {
-  echo -e "\033[36m▶ 从 GitHub 更新脚本...\033[0m"
-  TARGET_DIR="/root/data/cristsau/optimize_server"
-  TARGET_PATH="$TARGET_DIR/setup_optimize_server.sh"
-  GITHUB_URL="https://raw.githubusercontent.com/cristsau/server-optimization-scripts/main/setup_optimize_server.sh"
-  
-  echo "目标路径: $TARGET_PATH"
-  echo "下载命令如下，你可以手动复制运行："
-  echo -e "\033[33mmkdir -p $TARGET_DIR && wget -O $TARGET_PATH $GITHUB_URL && chmod +x $TARGET_PATH && sudo $TARGET_PATH\033[0m"
-  
-  read -p "是否直接执行下载并运行？(y/N): " confirm
-  if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-    mkdir -p "$TARGET_DIR"
-    if wget -O "$TARGET_PATH" "$GITHUB_URL"; then
-      chmod +x "$TARGET_PATH"
-      echo -e "\033[32m✔ 脚本下载成功，正在运行...\033[0m"
-      sudo "$TARGET_PATH"
-    else
-      echo -e "\033[31m✗ 下载失败，请检查网络或 GitHub 地址\033[0m"
-    fi
-  else
-    echo -e "\033[33m已取消自动下载，请手动运行上述命令\033[0m"
-  fi
 }
 
 while true; do
