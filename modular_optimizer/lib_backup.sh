@@ -32,90 +32,380 @@ install_db_client() {
 
 # Enhanced Upload Backup with "Keep N" Cleanup
 upload_backup() {
-   local file="$1" target_raw="$2" username="$3" password="$4" filename protocol="local" url="" host="" path_part="" target curl_status upload_status=-1 cleanup_success=true;
-   if [ -z "$file" ] || [ ! -f "$file" ]; then log "错误:upload_backup 无效源文件 $file"; return 1; fi
-   if [ -z "$target_raw" ]; then log "错误:upload_backup 无效目标路径"; return 1; fi
-   filename=$(basename "$file"); target="${target_raw%/}";
+    local file="$1" target="$2" username="$3" password="$4"
+    local filename=$(basename "$file") protocol url host path_part
 
-   # Protocol and URL Parsing
-   if [[ "$target" =~ ^https?:// ]]; then protocol="webdav"; url="${target}/$filename";
-   elif [[ "$target" =~ ^ftps?:// ]]; then protocol="ftp"; host=$(echo "$target" | sed -E 's|^ftps?://([^/]+).*|\1|'); path_part=$(echo "$target" | sed -E 's|^ftps?://[^/]+(/.*)?|\1|');
-   elif [[ "$target" =~ ^sftp:// ]]; then protocol="sftp"; local user_host; user_host=$(echo "$target" | sed -E 's|^sftp://([^/]+).*|\1|'); path_part=$(echo "$target" | sed -E 's|^sftp://[^/]+(/.*)?|\1|'); host="$user_host"; url="$target/$filename"; if [[ -z "$username" && "$user_host" == *@* ]]; then username=$(echo "$user_host" | cut -d@ -f1); host=$(echo "$user_host" | cut -d@ -f2); elif [[ -n "$username" ]]; then host=$(echo "$user_host" | sed 's/.*@//'); fi
-   elif [[ "$target" =~ ^scp:// ]]; then protocol="scp"; local uph; uph=$(echo "$target" | sed 's|^scp://||'); host=$(echo "$uph" | cut -d: -f1); path_part=$(echo "$uph" | cut -d: -f2); [ -z "$path_part" ] && path_part="."; url="$target/$filename"; if [[ -z "$username" && "$host" == *@* ]]; then username=$(echo "$host" | cut -d@ -f1); host=$(echo "$host" | cut -d@ -f2); elif [[ -n "$username" ]]; then host=$(echo "$host" | sed 's/.*@//'); fi
-   elif [[ "$target" =~ ^rsync:// ]]; then protocol="rsync"; local uph; uph=$(echo "$target" | sed 's|^rsync://||'); host=$(echo "$uph" | cut -d: -f1); path_part=$(echo "$uph" | cut -d: -f2); [ -z "$path_part" ] && path_part="."; url="$target/$filename"; if [[ -z "$username" && "$host" == *@* ]]; then username=$(echo "$host" | cut -d@ -f1); host=$(echo "$host" | cut -d@ -f2); elif [[ -n "$username" ]]; then host=$(echo "$host" | sed 's/.*@//'); fi
-   elif [[ "$target" =~ ^/ ]]; then protocol="local"; url="$target/$filename";
-   else echo -e "\033[31m✗ 不支持的目标路径格式: $target_raw\033[0m"; log "不支持的目标路径格式: $target_raw"; return 1; fi
-   log "准备上传 '$filename' 到 '$target_raw' (协议: $protocol)"
+    # 参数校验
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+        log "错误: upload_backup 无效源文件 $file"
+        return 1
+    fi
+    if [ -z "$target" ]; then
+        log "错误: upload_backup 无效目标路径"
+        return 1
+    fi
 
-   check_backup_tools "$protocol" || return 1
+    # 协议解析
+    if [[ "$target" =~ ^https?:// ]]; then
+        protocol="webdav"
+        url="${target%/}/$filename"
+    elif [[ "$target" =~ ^ftps?:// ]]; then
+        protocol="ftp"
+        host=$(echo "$target" | sed -E 's|^ftps?://([^/]+).*|\1|')
+        path_part=$(echo "$target" | sed -E 's|^ftps?://[^/]+(/.*)?|\1|')
+        url="${target%/}/$filename"
+    elif [[ "$target" =~ ^sftp:// ]]; then
+        protocol="sftp"
+        host=$(echo "$target" | sed -E 's|^sftp://([^/]+).*|\1|')
+        path_part=$(echo "$target" | sed -E 's|^sftp://[^/]+(/.*)?|\1|')
+        url="${target%/}/$filename"
+        if [[ -z "$username" && "$host" =~ .*@.* ]]; then
+            username=$(echo "$host" | cut -d@ -f1)
+            host=$(echo "$host" | cut -d@ -f2)
+        fi
+    elif [[ "$target" =~ ^scp:// ]]; then
+        protocol="scp"
+        host=$(echo "$target" | sed -E 's|^scp://([^/]+).*|\1|')
+        path_part=$(echo "$target" | sed -E 's|^scp://[^/]+(/.*)?|\1|')
+        url="${target%/}/$filename"
+        if [[ -z "$username" && "$host" =~ .*@.* ]]; then
+            username=$(echo "$host" | cut -d@ -f1)
+            host=$(echo "$host" | cut -d@ -f2)
+        fi
+    elif [[ "$target" =~ ^rsync:// ]]; then
+        protocol="rsync"
+        host=$(echo "$target" | sed -E 's|^rsync://([^/]+).*|\1|')
+        path_part=$(echo "$target" | sed -E 's|^rsync://[^/]+(/.*)?|\1|')
+        url="${target%/}/$filename"
+        if [[ -z "$username" && "$host" =~ .*@.* ]]; then
+            username=$(echo "$host" | cut -d@ -f1)
+            host=$(echo "$host" | cut -d@ -f2)
+        fi
+    elif [[ "$target" =~ ^/ ]]; then
+        protocol="local"
+        url="$target/$filename"
+    else
+        echo -e "\033[31m✗ 不支持的目标路径格式: $target\033[0m"
+        log "不支持的目标路径格式: $target"
+        return 1
+    fi
+    log "准备上传 '$filename' 到 '$target' (协议: $protocol)"
 
-   # --- Cleanup Old Backups (Using new retention vars) ---
-   # Load config silently to get retention days (use defaults if load fails)
-   # Ensure the exported variables from lib_config/load_config are used
-   local LOCAL_KEEP_N=${LOCAL_RETENTION_DAYS:-1} # Default 1 if not loaded/exported
-   local REMOTE_KEEP_N=${REMOTE_RETENTION_DAYS:-1} # Default 1 if not loaded/exported
-   [[ "$LOCAL_KEEP_N" -lt 0 ]] && LOCAL_KEEP_N=0
-   [[ "$REMOTE_KEEP_N" -lt 0 ]] && REMOTE_KEEP_N=0
+    # 检查备份工具
+    if [ "$protocol" != "local" ]; then
+        check_backup_tools "$protocol" || return 1
+    fi
 
-   local files_to_delete=() sorted_files all_files old_file delete_url old_href
-   cleanup_success=true
-   case $protocol in
-     webdav)
-        if [[ "$REMOTE_KEEP_N" -gt 0 ]]; then
-            echo -e "\033[36m正在尝试清理旧 WebDAV 备份 (保留最近 $REMOTE_KEEP_N 份)...\033[0m"
-            curl -u "$username:$password" --silent --fail -X PROPFIND "$target" -H "Depth: 1" --output "$TEMP_LOG"
-            if [ $? -eq 0 ] && [ -s "$TEMP_LOG" ]; then
-                all_files=$(grep '<D:href>' "$TEMP_LOG" | sed 's|.*<D:href>\(.*\)</D:href>.*|\1|' | grep -E '\.(sql\.gz|tar\.gz)$' | grep "/${filename%.sql.gz}" | grep -vF "/$filename")
-                sorted_files=$(echo "$all_files" | sed -n 's|.*/[^_]*_\([0-9]\{8\}_[0-9]\{6\}\)\..*|\1 &|p' | sort -k1,1r)
-                files_to_delete=($(echo "$sorted_files" | awk -v keep="$REMOTE_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's/^ //'))
-                if [ ${#files_to_delete[@]} -gt 0 ]; then
-                    log "找到 ${#files_to_delete[@]} 个旧 WebDAV 备份准备删除 (保留 $REMOTE_KEEP_N)"
-                    echo "删除旧 WebDAV 备份 (${#files_to_delete[@]} 个)..."
-                    for old_href in "${files_to_delete[@]}"; do
-                        if [[ "$target" == */ && "$old_href" == /* ]]; then delete_url="${target%/}${old_href}"; else delete_url="${target%/}/${old_href#/}"; fi
-                        log "尝试删除 WebDAV: $delete_url"
-                        curl -u "$username:$password" --silent --fail -X DELETE "$delete_url" || { log "WebDAV 删除失败: $delete_url"; cleanup_success=false; echo "删除失败: $old_href"; }
-                    done
-                else log "WebDAV 无旧备份需清理"; echo "无旧备份需清理。"; fi
-            else log "WebDAV 获取列表失败"; echo "无法获取WebDAV列表"; cleanup_success=false; fi; rm -f "$TEMP_LOG";
-        else echo -e "\033[33mℹ️  跳过远端(WebDAV)旧备份清理 (保留天数=0)\033[0m"; log "跳过远端WebDAV清理 (保留天数=0)"; fi;;
-     local)
-        if [[ "$LOCAL_KEEP_N" -gt 0 ]]; then
-            log "清理本地旧备份 (保留 $LOCAL_KEEP_N)"; echo "清理本地旧备份 (保留 $LOCAL_KEEP_N)..."
-            local files_to_process; files_to_process=$(find "$target" -maxdepth 1 -type f \( -name "*.tar.gz" -o -name "*.sql.gz" \) -not -name "$filename" -printf '%T@ %p\n')
-            if [ -n "$files_to_process" ]; then
-                 files_to_delete=($(echo "$files_to_process" | sort -k1,1nr | awk -v keep="$LOCAL_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's/^ //'))
-                 if [ ${#files_to_delete[@]} -gt 0 ]; then
-                     log "找到 ${#files_to_delete[@]} 个旧本地备份准备删除"
-                     echo "删除旧本地备份 (${#files_to_delete[@]} 个)..."
-                     printf "  %s\n" "${files_to_delete[@]}"
-                     rm -f "${files_to_delete[@]}" || { log "本地删除失败"; cleanup_success=false; }
-                 else log "本地无旧备份需清理"; echo "无旧备份需清理。"; fi
-            else log "本地未找到旧备份文件"; echo "未找到旧备份文件。"; fi
-            $cleanup_success || echo "本地清理可能存在错误。";
-        else echo -e "\033[33mℹ️  跳过本地旧备份清理 (保留天数=0)\033[0m"; log "跳过本地清理 (保留天数=0)"; fi;;
-     sftp|ftp|rsync|scp) log "$protocol 不支持基于日期的自动清理"; echo "协议 $protocol 不支持基于日期的自动清理旧备份。"; cleanup_success=false;;
-     *) log "未知协议清理"; cleanup_success=false;;
-   esac
-   if ! $cleanup_success; then echo -e "\033[33m警告：旧备份清理未完成或失败。\033[0m"; fi
+    # 加载保留天数配置（与原始脚本一致）
+    local LOCAL_KEEP_N=${LOCAL_RETENTION_DAYS:-1}  # 默认保留 1 个本地文件
+    local REMOTE_KEEP_N=${REMOTE_RETENTION_DAYS:-1}  # 默认保留 1 个远程文件
+    [[ "$LOCAL_KEEP_N" -lt 0 ]] && LOCAL_KEEP_N=0
+    [[ "$REMOTE_KEEP_N" -lt 0 ]] && REMOTE_KEEP_N=0
+    log "保留配置: 本地保留 $LOCAL_KEEP_N 个, 远程保留 $REMOTE_KEEP_N 个"
 
-   # --- Upload ---
-   echo -e "\033[36m正在上传 '$filename' (协议: $protocol)...\033[0m";
-   local upload_cmd="" sftp_cmd="" scp_cmd="" rsync_cmd=""
-   upload_status=-1
-   case $protocol in
-     webdav) curl -u "$username:$password" -T "$file" "$url" -fsS; upload_status=$?; if [ $upload_status -eq 0 ]; then curl -u "$username:$password" -fsI "$url" -o /dev/null || { log "WebDAV 验证失败"; echo "警告:WebDAV 验证失败"; }; fi;;
-     ftp) if command -v lftp > /dev/null; then lftp -c "set ftp:ssl-allow no; open -u '$username','$password' '$host'; cd '$path_part'; put '$file' -o '$filename'; bye"; upload_status=$?; elif command -v ftp > /dev/null; then echo -e "user $username $password\nbinary\ncd $path_part\nput '$file' '$filename'\nquit" | ftp -n "$host" > "$TEMP_LOG" 2>&1; grep -qE "Transfer complete|Bytes sent" "$TEMP_LOG" && upload_status=0 || upload_status=1; rm -f "$TEMP_LOG"; else log "错误:无ftp/lftp客户端"; upload_status=1; fi;;
-     sftp) st="$username@$host"; pc="put '$file' '$path_part/$filename'"; qc="quit"; scmd=""; if [[ -f "$password" ]]; then scmd="sftp -i '$password' '$st'"; elif [[ -n "$password" ]] && command -v sshpass > /dev/null; then scmd="sshpass -p '$password' sftp '$st'"; elif [[ -n "$password" ]]; then upload_status=1; else scmd="sftp '$st'"; fi; [ "$upload_status" != 1 ] && { echo -e "$pc\n$qc" | $scmd > "$TEMP_LOG" 2>&1; upload_status=$?; rm -f "$TEMP_LOG"; } || { log "SFTP 准备失败(sshpass?)"; upload_status=1; };;
-     scp) st="$username@$host:'$path_part/$filename'"; scmd=""; if [[ -f "$password" ]]; then scmd="scp -i '$password'"; elif [[ -n "$password" ]] && command -v sshpass > /dev/null; then scmd="sshpass -p '$password' scp"; elif [[ -n "$password" ]]; then upload_status=1; else scmd="scp"; fi; [ "$upload_status" != 1 ] && { $scmd "$file" "$st" > "$TEMP_LOG" 2>&1; upload_status=$?; rm -f "$TEMP_LOG"; } || { log "SCP 准备失败(sshpass?)"; upload_status=1; };;
-     rsync) rt="$username@$host:'$path_part/$filename'"; ro="-az --remove-source-files"; sshc="ssh"; if [[ -f "$password" ]]; then sshc="ssh -i \'$password\'"; elif [[ -n "$password" ]] && command -v sshpass > /dev/null; then sshc="sshpass -p \'$password\' ssh"; elif [[ -n "$password" ]]; then upload_status=1; fi; [ "$upload_status" != 1 ] && { rsync $ro -e "$sshc" "$file" "$rt" > "$TEMP_LOG" 2>&1; upload_status=$?; rm -f "$TEMP_LOG"; } || { log "rsync 准备失败(sshpass?)"; upload_status=1; };;
-     local) mkdir -p "$target" && mv "$file" "$url"; upload_status=$?;;
-     *) log "错误:未知上传协议 $protocol"; upload_status=1;;
-   esac
+    # 清理旧备份
+    case $protocol in
+        webdav)
+            if [[ "$REMOTE_KEEP_N" -gt 0 ]]; then
+                echo -e "\033[36m正在清理 WebDAV 旧备份 (保留最近 $REMOTE_KEEP_N 份)...\033[0m"
+                curl -u "$username:$password" -X PROPFIND "${target%/}" -H "Depth: 1" >"$TEMP_LOG" 2>&1
+                if [ $? -eq 0 ] && [ -s "$TEMP_LOG" ]; then
+                    # 提取文件列表
+                    if command -v grep >/dev/null 2>&1 && grep -P "" /dev/null >/dev/null 2>&1; then
+                        all_files=$(grep -oP '(?<=<D:href>).*?(?=</D:href>)' "$TEMP_LOG" | grep -E '\.(tar\.gz|sql\.gz)$')
+                    else
+                        all_files=$(grep '<D:href>' "$TEMP_LOG" | sed 's|.*<D:href>\(.*\)</D:href>.*|\1|' | grep -E '\.(tar\.gz|sql\.gz)$')
+                    fi
+                    log "WebDAV 提取的所有备份文件路径: $all_files"
 
-   # --- Cleanup and Return ---
-   if [ $upload_status -eq 0 ]; then echo "✅ 上传/移动成功: $url"; log "备份上传成功: $url"; if [[ "$protocol" != "rsync" && -f "$file" ]]; then rm -f "$file"; log "临时文件'$file'已删除"; fi; return 0;
-   else echo "❌ 上传/移动失败(码:$upload_status)"; log "备份上传失败: $url (码:$upload_status)"; if [ -f "$file" ]; then echo "⚠️ 临时文件'$file'未删除"; fi; return 1; fi
+                    # 按时间戳排序并筛选旧文件
+                    sorted_files=$(echo "$all_files" | sed -n 's|.*/[^_]*_\([0-9]\{8\}_[0-9]\{6\}\)\..*|\1 &|p' | sort -k1,1r)
+                    files_to_delete=$(echo "$sorted_files" | awk -v keep="$REMOTE_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's|^ ||')
+                    log "WebDAV 待删除旧备份文件: $files_to_delete"
+
+                    if [ -n "$files_to_delete" ]; then
+                        for old_file in $files_to_delete; do
+                            delete_url="${target%/}/${old_file##*/}"
+                            log "尝试删除 WebDAV 文件: $delete_url"
+                            curl -u "$username:$password" -X DELETE "$delete_url" >"$TEMP_LOG" 2>&1
+                            if [ $? -eq 0 ]; then
+                                echo -e "\033[32m✔ 删除旧文件: $delete_url\033[0m"
+                                log "WebDAV 旧备份删除成功: $delete_url"
+                            else
+                                echo -e "\033[31m✗ 删除旧文件失败: $delete_url\033[0m"
+                                echo "服务器响应：$(cat "$TEMP_LOG")"
+                                log "WebDAV 旧备份删除失败: $(cat "$TEMP_LOG")"
+                            fi
+                        done
+                    else
+                        echo -e "\033[32m✔ 无旧备份需要清理\033[0m"
+                        log "WebDAV 无旧备份需要清理"
+                    fi
+                else
+                    echo -e "\033[31m✗ 无法获取 WebDAV 文件列表\033[0m"
+                    echo "服务器响应：$(cat "$TEMP_LOG")"
+                    log "WebDAV 获取文件列表失败: $(cat "$TEMP_LOG")"
+                fi
+            else
+                echo -e "\033[33mℹ️  跳过 WebDAV 旧备份清理 (保留份数=0)\033[0m"
+                log "跳过 WebDAV 清理 (保留份数=0)"
+            fi
+            rm -f "$TEMP_LOG"
+            ;;
+        sftp)
+            if [[ "$REMOTE_KEEP_N" -gt 0 ]]; then
+                echo -e "\033[36m正在清理 SFTP 旧备份 (保留最近 $REMOTE_KEEP_N 份)...\033[0m"
+                if [[ -f "$password" ]]; then
+                    echo "ls -l" | sftp -i "$password" "$username@$host" >"$TEMP_LOG" 2>&1
+                elif [[ -n "$password" ]] && command -v sshpass >/dev/null; then
+                    echo "ls -l" | sshpass -p "$password" sftp "$username@$host" >"$TEMP_LOG" 2>&1
+                else
+                    echo "ls -l" | sftp "$username@$host" >"$TEMP_LOG" 2>&1
+                fi
+                if [ $? -eq 0 ]; then
+                    all_files=$(grep -E '\.(tar\.gz|sql\.gz)$' "$TEMP_LOG" | awk '{print $NF}')
+                    sorted_files=$(echo "$all_files" | sed -n 's|.*_\([0-9]\{8\}_[0-9]\{6\}\)\..*|\1 &|p' | sort -k1,1r)
+                    files_to_delete=$(echo "$sorted_files" | awk -v keep="$REMOTE_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's|^ ||')
+                    log "SFTP 待删除旧备份文件: $files_to_delete"
+                    if [ -n "$files_to_delete" ]; then
+                        for old_file in $files_to_delete; do
+                            if [[ -f "$password" ]]; then
+                                echo "rm $path_part/$old_file" | sftp -i "$password" "$username@$host" >"$TEMP_LOG" 2>&1
+                            elif [[ -n "$password" ]] && command -v sshpass >/dev/null; then
+                                echo "rm $path_part/$old_file" | sshpass -p "$password" sftp "$username@$host" >"$TEMP_LOG" 2>&1
+                            else
+                                echo "rm $path_part/$old_file" | sftp "$username@$host" >"$TEMP_LOG" 2>&1
+                            fi
+                            if [ $? -eq 0 ]; then
+                                echo -e "\033[32m✔ 删除旧文件: $old_file\033[0m"
+                                log "SFTP 旧备份删除成功: $old_file"
+                            else
+                                echo -e "\033[33m⚠ 删除旧文件失败: $old_file\033[0m"
+                                log "SFTP 旧备份删除失败: $(cat "$TEMP_LOG")"
+                            fi
+                        done
+                    else
+                        echo -e "\033[32m✔ 无旧备份需要清理\033[0m"
+                        log "SFTP 无旧备份需要清理"
+                    fi
+                else
+                    echo -e "\033[33m⚠ 无法获取 SFTP 文件列表，跳过清理\033[0m"
+                    log "SFTP 获取文件列表失败: $(cat "$TEMP_LOG")"
+                fi
+            else
+                echo -e "\033[33mℹ️  跳过 SFTP 旧备份清理 (保留份数=0)\033[0m"
+                log "跳过 SFTP 清理 (保留份数=0)"
+            fi
+            rm -f "$TEMP_LOG"
+            ;;
+        ftp)
+            if [[ "$REMOTE_KEEP_N" -gt 0 ]]; then
+                echo -e "\033[36m正在清理 FTP 旧备份 (保留最近 $REMOTE_KEEP_N 份)...\033[0m"
+                if command -v lftp >/dev/null; then
+                    lftp -u "$username,$password" "$host" -e "ls; bye" >"$TEMP_LOG" 2>&1
+                    if [ $? -eq 0 ]; then
+                        all_files=$(grep -E '\.(tar\.gz|sql\.gz)$' "$TEMP_LOG" | awk '{print $NF}')
+                        sorted_files=$(echo "$all_files" | sed -n 's|.*_\([0-9]\{8\}_[0-9]\{6\}\)\..*|\1 &|p' | sort -k1,1r)
+                        files_to_delete=$(echo "$sorted_files" | awk -v keep="$REMOTE_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's|^ ||')
+                        log "FTP 待删除旧备份文件: $files_to_delete"
+                        if [ -n "$files_to_delete" ]; then
+                            for old_file in $files_to_delete; do
+                                lftp -u "$username,$password" "$host" -e "rm $path_part/$old_file; bye" >"$TEMP_LOG" 2>&1
+                                if [ $? -eq 0 ]; then
+                                    echo -e "\033[32m✔ 删除旧文件: $old_file\033[0m"
+                                    log "FTP 旧备份删除成功: $old_file"
+                                else
+                                    echo -e "\033[33m⚠ 删除旧文件失败: $old_file\033[0m"
+                                    log "FTP 旧备份删除失败: $(cat "$TEMP_LOG")"
+                                fi
+                            done
+                        else
+                            echo -e "\033[32m✔ 无旧备份需要清理\033[0m"
+                            log "FTP 无旧备份需要清理"
+                        fi
+                    else
+                        echo -e "\033[33m⚠ 无法获取 FTP 文件列表，跳过清理\033[0m"
+                        log "FTP 获取文件列表失败: $(cat "$TEMP_LOG")"
+                    fi
+                else
+                    echo -e "\033[33m⚠ FTP 清理需要 lftp，跳过清理\033[0m"
+                    log "FTP 清理需要 lftp，未安装"
+                fi
+            else
+                echo -e "\033[33mℹ️  跳过 FTP 旧备份清理 (保留份数=0)\033[0m"
+                log "跳过 FTP 清理 (保留份数=0)"
+            fi
+            rm -f "$TEMP_LOG"
+            ;;
+        local)
+            if [[ "$LOCAL_KEEP_N" -gt 0 ]]; then
+                echo -e "\033[36m正在清理本地旧备份 (保留最近 $LOCAL_KEEP_N 份)...\033[0m"
+                all_files=$(find "$target" -maxdepth 1 -type f \( -name "*.tar.gz" -o -name "*.sql.gz" \) -not -name "$filename" -printf '%T@ %p\n')
+                if [ -n "$all_files" ]; then
+                    files_to_delete=$(echo "$all_files" | sort -k1,1nr | awk -v keep="$LOCAL_KEEP_N" 'NR > keep { $1=""; print $0 }' | sed 's|^ ||')
+                    log "本地待删除旧备份文件: $files_to_delete"
+                    if [ -n "$files_to_delete" ]; then
+                        for old_file in $files_to_delete; do
+                            rm -f "$old_file"
+                            if [ $? -eq 0 ]; then
+                                echo -e "\033[32m✔ 删除旧文件: $old_file\033[0m"
+                                log "本地旧备份删除成功: $old_file"
+                            else
+                                echo -e "\033[33m⚠ 删除旧文件失败: $old_file\033[0m"
+                                log "本地旧备份删除失败: $old_file"
+                            fi
+                        done
+                    else
+                        echo -e "\033[32m✔ 无旧备份需要清理\033[0m"
+                        log "本地无旧备份需要清理"
+                    fi
+                else
+                    echo -e "\033[32m✔ 未找到旧备份文件\033[0m"
+                    log "本地未找到旧备份文件"
+                fi
+            else
+                echo -e "\033[33mℹ️  跳过本地旧备份清理 (保留份数=0)\033[0m"
+                log "跳过本地清理 (保留份数=0)"
+            fi
+            ;;
+        scp|rsync)
+            echo -e "\033[33m⚠ $protocol 暂不支持自动清理旧备份，请手动管理远端文件\033[0m"
+            log "$protocol 不支持自动清理旧备份"
+            ;;
+    esac
+
+    # 上传新备份
+    echo -e "\033[36m正在上传 '$filename' 到 '$url' (协议: $protocol)...\033[0m"
+    case $protocol in
+        webdav)
+            curl -u "$username:$password" -T "$file" "$url" -v >"$TEMP_LOG" 2>&1
+            curl_status=$?
+            log "curl 上传返回码: $curl_status"
+            if [ $curl_status -eq 0 ]; then
+                curl -u "$username:$password" -I "$url" >"$TEMP_LOG" 2>&1
+                if grep -q "HTTP/[0-9.]* 20[0-1]" "$TEMP_LOG"; then
+                    echo -e "\033[32m✔ 上传成功: $url\033[0m"
+                    log "备份上传成功: $url"
+                    rm -f "$file"
+                    rm -f "$TEMP_LOG"
+                    return 0
+                else
+                    echo -e "\033[31m✗ 上传失败：服务器未确认文件存在\033[0m"
+                    echo "服务器响应：$(cat "$TEMP_LOG")"
+                    log "备份上传失败: 服务器未确认文件存在"
+                    rm -f "$TEMP_LOG"
+                    return 1
+                fi
+            else
+                echo -e "\033[31m✗ 上传失败：\033[0m"
+                echo "服务器响应：$(cat "$TEMP_LOG")"
+                log "备份上传失败: $(cat "$TEMP_LOG")"
+                rm -f "$TEMP_LOG"
+                return 1
+            fi
+            ;;
+        ftp)
+            if command -v lftp >/dev/null; then
+                lftp -u "$username,$password" "$host" -e "cd $path_part; put '$file' -o '$filename'; bye" >"$TEMP_LOG" 2>&1
+                if [ $? -eq 0 ]; then
+                    echo -e "\033[32m✔ 上传成功: $url\033[0m"
+                    log "备份上传成功: $url"
+                    rm -f "$file"
+                    rm -f "$TEMP_LOG"
+                    return 0
+                else
+                    echo -e "\033[31m✗ 上传失败：\033[0m"
+                    echo "服务器响应：$(cat "$TEMP_LOG")"
+                    log "备份上传失败: $(cat "$TEMP_LOG")"
+                    rm -f "$TEMP_LOG"
+                    return 1
+                fi
+            else
+                echo -e "\033[31m✗ FTP 上传需要 lftp，未安装\033[0m"
+                log "FTP 上传失败: lftp 未安装"
+                return 1
+            fi
+            ;;
+        sftp)
+            if [[ -f "$password" ]]; then
+                echo "put '$file' '$path_part/$filename'" | sftp -i "$password" "$username@$host" >"$TEMP_LOG" 2>&1
+            elif [[ -n "$password" ]] && command -v sshpass >/dev/null; then
+                echo "put '$file' '$path_part/$filename'" | sshpass -p "$password" sftp "$username@$host" >"$TEMP_LOG" 2>&1
+            else
+                echo "put '$file' '$path_part/$filename'" | sftp "$username@$host" >"$TEMP_LOG" 2>&1
+            fi
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✔ 上传成功: $url\033[0m"
+                log "备份上传成功: $url"
+                rm -f "$file"
+                rm -f "$TEMP_LOG"
+                return 0
+            else
+                echo -e "\033[31m✗ 上传失败：\033[0m"
+                echo "服务器响应：$(cat "$TEMP_LOG")"
+                log "备份上传失败: $(cat "$TEMP_LOG")"
+                rm -f "$TEMP_LOG"
+                return 1
+            fi
+            ;;
+        scp)
+            if [[ -f "$password" ]]; then
+                scp -i "$password" "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            elif [[ -n "$password" ]] && command -v sshpass >/dev/null; then
+                sshpass -p "$password" scp "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            else
+                scp "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            fi
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✔ 上传成功: $url\033[0m"
+                log "备份上传成功: $url"
+                rm -f "$file"
+                rm -f "$TEMP_LOG"
+                return 0
+            else
+                echo -e "\033[31m✗ 上传失败：\033[0m"
+                echo "服务器响应：$(cat "$TEMP_LOG")"
+                log "备份上传失败: $(cat "$TEMP_LOG")"
+                rm -f "$TEMP_LOG"
+                return 1
+            fi
+            ;;
+        rsync)
+            if [[ -f "$password" ]]; then
+                rsync -az -e "ssh -i '$password'" "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            elif [[ -n "$password" ]] && command -v sshpass >/dev/null; then
+                rsync -az -e "sshpass -p '$password' ssh" "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            else
+                rsync -az "$file" "$username@$host:$path_part/$filename" >"$TEMP_LOG" 2>&1
+            fi
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✔ 上传成功: $url\033[0m"
+                log "备份上传成功: $url"
+                rm -f "$file"
+                rm -f "$TEMP_LOG"
+                return 0
+            else
+                echo -e "\033[31m✗ 上传失败：\033[0m"
+                echo "服务器响应：$(cat "$TEMP_LOG")"
+                log "备份上传失败: $(cat "$TEMP_LOG")"
+                rm -f "$TEMP_LOG"
+                return 1
+            fi
+            ;;
+        local)
+            mkdir -p "$target"
+            mv "$file" "$url"
+            if [ $? -eq 0 ]; then
+                echo -e "\033[32m✔ 本地备份成功: $url\033[0m"
+                log "本地备份成功: $url"
+                return 0
+            else
+                echo -e "\033[31m✗ 本地备份失败\033[0m"
+                log "本地备份失败"
+                return 1
+            fi
+            ;;
+    esac
 }
 
 
