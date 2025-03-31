@@ -1,15 +1,42 @@
 #!/bin/bash
-# lib_install.sh - Installation and script generation functions
+# lib_install.sh - Installation and optimize script generation (v1.2 - Fix script generation)
 
 # --- Robustness Settings ---
 set -uo pipefail
 
-# --- Source ---
-source "$SCRIPT_DIR/lib_utils.sh" # For log
+# --- Variables & Source ---
+# Assume SCRIPT_PATH, LOG_FILE, CURRENT_VERSION, SCRIPT_DIR, OPTIMIZE_CONFIG_FILE are exported from main
+# shellcheck source=./lib_utils.sh
+source "$SCRIPT_DIR/lib_utils.sh" # For log, manage_cron
+# shellcheck source=./lib_config.sh
+source "$SCRIPT_DIR/lib_config.sh" # For create_optimize_config
 
 # --- Functions ---
 
-# Generate Traffic Monitor Script
+setup_main_logrotate() {
+    local logrotate_conf="/etc/logrotate.d/setup_optimize_server_main"
+    log "配置主脚本日志轮转: $logrotate_conf"
+    # Use cat > file <<EOF structure
+    cat > "$logrotate_conf" <<EOF
+$LOG_FILE {
+    rotate 4
+    weekly
+    size 10M
+    missingok
+    notifempty
+    delaycompress
+    compress
+    copytruncate
+}
+EOF
+    # --- End of Heredoc ---
+    if [ $? -eq 0 ]; then 
+        log "主脚本日志轮转配置成功"
+    else 
+        log "错误: 写入主脚本logrotate配置失败"
+    fi
+}
+
 generate_traffic_monitor_script() {
     local TELEGRAM_BOT_TOKEN="$1"
     local CHAT_ID="$2"
@@ -236,39 +263,102 @@ EOF
     echo "流量监控脚本已生成并配置完成，路径：$script_path"
 }
 
-# Install or update the optimization script
 install_script() {
-    log "开始安装或更新优化脚本..."
-    echo "正在安装或更新优化脚本..."
+    echo -e "\033[36m▶ 开始安装/更新优化脚本 (v$CURRENT_VERSION)...\033[0m"
+    local day hour template_file exit_code escaped_log_file
 
-    # 检查模板文件是否存在
-    if [ ! -f "$SCRIPT_DIR/optimize_server.sh.tpl" ]; then
-        echo "错误: 模板文件 $SCRIPT_DIR/optimize_server.sh.tpl 未找到!"
-        log "错误: 模板文件 $SCRIPT_DIR/optimize_server.sh.tpl 未找到!"
+    # 交互式输入：每周运行天数和小时
+    while true; do 
+        read -p "每周运行天数(0-6, *=每天): " day
+        read -p "运行小时(0-23): " hour
+        if [[ ( "$day" =~ ^[0-6]$ || "$day" == "*" ) && "$hour" =~ ^([0-9]|1[0-9]|2[0-3])$ ]]; then 
+            break
+        else 
+            echo "输入无效"
+        fi
+    done
+
+    # 检查日志文件可写性
+    if ! touch "$LOG_FILE" 2>/dev/null; then 
+        LOG_FILE="/tmp/setup_optimize_server.log"
+        echo "警告: 无法写入 $LOG_FILE, 日志将保存到 $LOG_FILE" >&2
+        if ! touch "$LOG_FILE" 2>/dev/null; then 
+            echo "错误: 无法写入日志文件"
+            return 1
+        fi
+    fi
+    chmod 644 "$LOG_FILE" 2>/dev/null || log "警告: 无法设置 $LOG_FILE 权限"
+    log "脚本安装/更新开始"
+
+    # 检查模板文件
+    template_file="$SCRIPT_DIR/optimize_server.sh.tpl"
+    if [ ! -f "$template_file" ]; then 
+        log "错误: 模板 $template_file 未找到!"
+        echo "模板文件缺失!"
         return 1
     fi
 
-    # 生成并安装优化脚本
-    cp "$SCRIPT_DIR/optimize_server.sh.tpl" "$SCRIPT_PATH"
+    # 创建优化配置文件
+    create_optimize_config || return 1 # from lib_config.sh
+
+    # 生成优化脚本
+    escaped_log_file=$(echo "$LOG_FILE" | sed 's/[\/&]/\\&/g') # Escape for sed
+    log "生成 $SCRIPT_PATH ..."
+    sed -e "s|__LOG_FILE__|$escaped_log_file|g" -e "s|__CURRENT_VERSION__|$CURRENT_VERSION|g" "$template_file" > "$SCRIPT_PATH"
     if [ $? -ne 0 ]; then
-        echo "错误: 无法复制优化脚本到 $SCRIPT_PATH!"
-        log "错误: 无法复制优化脚本到 $SCRIPT_PATH!"
+        log "错误: 生成或写入优化脚本 $SCRIPT_PATH 失败。"
+        echo "生成或写入脚本失败"
+        rm -f "$SCRIPT_PATH" 2>/dev/null
         return 1
     fi
 
-    chmod +x "$SCRIPT_PATH"
-    if [ $? -ne 0 ]; then
-        echo "错误: 无法设置 $SCRIPT_PATH 的执行权限!"
-        log "错误: 无法设置 $SCRIPT_PATH 的执行权限!"
+    # 检查生成的文件
+    if [ ! -s "$SCRIPT_PATH" ] || ! grep -q "LOG_FILE=" "$SCRIPT_PATH"; then
+        log "错误: 生成的脚本为空或替换失败 $SCRIPT_PATH"
+        echo "生成的脚本为空或替换失败"
+        rm -f "$SCRIPT_PATH" 2>/dev/null
         return 1
     fi
 
-    # 设置日志轮转（如果 lib_utils.sh 中有此函数）
-    if command -v setup_main_logrotate >/dev/null 2>&1; then
-        setup_main_logrotate
+    # 验证脚本语法
+    log "检查生成脚本 $SCRIPT_PATH 的语法..."
+    if ! bash -n "$SCRIPT_PATH"; then
+        log "错误: 生成的脚本 $SCRIPT_PATH 包含语法错误"
+        echo -e "\033[31m生成的优化脚本包含语法错误，请检查模板 $template_file\033[0m"
+        return 1
+    else
+        log "生成脚本语法检查通过。"
     fi
 
-    echo "优化脚本已安装或更新完成，路径：$SCRIPT_PATH"
-    log "优化脚本已安装或更新完成，路径：$SCRIPT_PATH"
-    return 0
+    # 设置权限和计划任务
+    chmod +x "$SCRIPT_PATH" || { log "错误: 设置权限失败"; return 1; }
+    manage_cron "$hour" "$day" || { log "错误: 设置Cron失败"; return 1; } # from lib_utils.sh
+    setup_main_logrotate || { log "错误: 配置主脚本日志轮转失败"; return 1; }
+
+    # 执行初始化测试
+    echo -e "\033[36m▶ 正在执行初始化测试...\033[0m"
+    if timeout 60s bash "$SCRIPT_PATH"; then
+        sleep 1
+        if tail -n 10 "$LOG_FILE" | grep -q "=== 优化任务结束 ==="; then 
+            echo -e "\033[32m✔ 安装/更新成功并通过测试。\033[0m"
+            log "安装/更新验证成功"
+            return 0
+        else 
+            echo -e "\033[31m✗ 测试未完成(无结束标记), 检查日志 $LOG_FILE。\033[0m"
+            tail -n 20 "$LOG_FILE" >&2
+            log "测试失败(无结束标记)"
+            return 1
+        fi
+    else
+        exit_code=$?
+        if [ $exit_code -eq 124 ]; then 
+            echo -e "\033[31m✗ 测试执行超时(60s)。\033[0m"
+            log "测试执行超时"
+        else 
+            echo -e "\033[31m✗ 测试执行失败(码 $exit_code), 检查日志 $LOG_FILE。\033[0m"
+            log "测试执行失败(码 $exit_code)"
+        fi
+        tail -n 20 "$LOG_FILE" >&2
+        return 1
+    fi
 }
