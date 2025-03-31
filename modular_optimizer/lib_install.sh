@@ -235,3 +235,40 @@ EOF
     log "流量监控脚本已生成并配置完成，路径：$script_path"
     echo "流量监控脚本已生成并配置完成，路径：$script_path"
 }
+
+# Install or update the optimization script
+install_script() {
+    log "开始安装或更新优化脚本..."
+    echo "正在安装或更新优化脚本..."
+
+    # 检查模板文件是否存在
+    if [ ! -f "$SCRIPT_DIR/optimize_server.sh.tpl" ]; then
+        echo "错误: 模板文件 $SCRIPT_DIR/optimize_server.sh.tpl 未找到!"
+        log "错误: 模板文件 $SCRIPT_DIR/optimize_server.sh.tpl 未找到!"
+        return 1
+    fi
+
+    # 生成并安装优化脚本
+    cp "$SCRIPT_DIR/optimize_server.sh.tpl" "$SCRIPT_PATH"
+    if [ $? -ne 0 ]; then
+        echo "错误: 无法复制优化脚本到 $SCRIPT_PATH!"
+        log "错误: 无法复制优化脚本到 $SCRIPT_PATH!"
+        return 1
+    fi
+
+    chmod +x "$SCRIPT_PATH"
+    if [ $? -ne 0 ]; then
+        echo "错误: 无法设置 $SCRIPT_PATH 的执行权限!"
+        log "错误: 无法设置 $SCRIPT_PATH 的执行权限!"
+        return 1
+    fi
+
+    # 设置日志轮转（如果 lib_utils.sh 中有此函数）
+    if command -v setup_main_logrotate >/dev/null 2>&1; then
+        setup_main_logrotate
+    fi
+
+    echo "优化脚本已安装或更新完成，路径：$SCRIPT_PATH"
+    log "优化脚本已安装或更新完成，路径：$SCRIPT_PATH"
+    return 0
+}
