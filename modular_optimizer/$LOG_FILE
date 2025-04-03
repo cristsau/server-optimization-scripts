@@ -1,0 +1,58 @@
+Filesystem      Size  Used Avail Use% Mounted on
+udev            448M     0  448M   0% /dev
+tmpfs            93M  984K   92M   2% /run
+/dev/vda1        20G   12G  7.5G  61% /
+tmpfs           462M     0  462M   0% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/567220359b90cafdccd02bdf5167d8488139d87209b4687ed9bae942d7122fbd/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/1e28b6e7f49b79ead4cd7dcee3069dd1cb324b43c6d064cedaa54963e09a82a5/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/736b8c69db149408479488050745b8d6514e17343ed1dea0d5d153aa9f7e90a2/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/c550ddfbd8d57498f576185ac61abf84bc465c074cfff068674e4db6ff93fe2c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/251d789c08e1eda36067b296cbb6173184c207250b14e300afd0d009aea2026c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0949d2a37a1def1ec5375988719f64d0a4777d1ad2c053dcda7b59a343993745/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0cce7fb116f207184eeca77e73883e80232896dbb50a297839a15aa95123873e/merged
+tmpfs            93M     0   93M   0% /run/user/0
+find: invalid argument `+$((CLEAN_LOG_DAYS - 1))' to `-mtime'
+Filesystem      Size  Used Avail Use% Mounted on
+udev            448M     0  448M   0% /dev
+tmpfs            93M  984K   92M   2% /run
+/dev/vda1        20G   12G  7.5G  61% /
+tmpfs           462M     0  462M   0% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/567220359b90cafdccd02bdf5167d8488139d87209b4687ed9bae942d7122fbd/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/1e28b6e7f49b79ead4cd7dcee3069dd1cb324b43c6d064cedaa54963e09a82a5/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/736b8c69db149408479488050745b8d6514e17343ed1dea0d5d153aa9f7e90a2/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/c550ddfbd8d57498f576185ac61abf84bc465c074cfff068674e4db6ff93fe2c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/251d789c08e1eda36067b296cbb6173184c207250b14e300afd0d009aea2026c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0949d2a37a1def1ec5375988719f64d0a4777d1ad2c053dcda7b59a343993745/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0cce7fb116f207184eeca77e73883e80232896dbb50a297839a15aa95123873e/merged
+tmpfs            93M     0   93M   0% /run/user/0
+Filesystem      Size  Used Avail Use% Mounted on
+udev            448M     0  448M   0% /dev
+tmpfs            93M  992K   92M   2% /run
+/dev/vda1        20G   12G  7.5G  61% /
+tmpfs           462M     0  462M   0% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/567220359b90cafdccd02bdf5167d8488139d87209b4687ed9bae942d7122fbd/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/1e28b6e7f49b79ead4cd7dcee3069dd1cb324b43c6d064cedaa54963e09a82a5/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/736b8c69db149408479488050745b8d6514e17343ed1dea0d5d153aa9f7e90a2/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/c550ddfbd8d57498f576185ac61abf84bc465c074cfff068674e4db6ff93fe2c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/251d789c08e1eda36067b296cbb6173184c207250b14e300afd0d009aea2026c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0949d2a37a1def1ec5375988719f64d0a4777d1ad2c053dcda7b59a343993745/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0cce7fb116f207184eeca77e73883e80232896dbb50a297839a15aa95123873e/merged
+tmpfs            93M     0   93M   0% /run/user/0
+find: invalid argument `+$((CLEAN_LOG_DAYS - 1))' to `-mtime'
+Filesystem      Size  Used Avail Use% Mounted on
+udev            448M     0  448M   0% /dev
+tmpfs            93M  992K   92M   2% /run
+/dev/vda1        20G   12G  7.5G  61% /
+tmpfs           462M     0  462M   0% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/567220359b90cafdccd02bdf5167d8488139d87209b4687ed9bae942d7122fbd/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/1e28b6e7f49b79ead4cd7dcee3069dd1cb324b43c6d064cedaa54963e09a82a5/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/736b8c69db149408479488050745b8d6514e17343ed1dea0d5d153aa9f7e90a2/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/c550ddfbd8d57498f576185ac61abf84bc465c074cfff068674e4db6ff93fe2c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/251d789c08e1eda36067b296cbb6173184c207250b14e300afd0d009aea2026c/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0949d2a37a1def1ec5375988719f64d0a4777d1ad2c053dcda7b59a343993745/merged
+overlay          20G   12G  7.5G  61% /var/lib/docker/overlay2/0cce7fb116f207184eeca77e73883e80232896dbb50a297839a15aa95123873e/merged
+tmpfs            93M     0   93M   0% /run/user/0
