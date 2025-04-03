@@ -1,7 +1,7 @@
 #!/bin/bash
 # 脚本名称：cristsau_modular_optimizer
 # 作者：cristsau
-# 版本：1.3 (内置流量监控, 修复生成脚本错误)
+# 版本：1.3.1 (修复 toolbox_menu, 添加流量阈值输入和提醒)
 # 功能：服务器优化管理工具 (模块化版本)
 
 # --- Robustness Settings ---
@@ -12,7 +12,7 @@ SCRIPT_NAME="optimize_server.sh"
 SCRIPT_PATH="/usr/local/bin/$SCRIPT_NAME"
 LOG_FILE="/var/log/optimize_server.log"
 TEMP_LOG="/tmp/optimize_temp.log"
-CURRENT_VERSION="1.3"
+CURRENT_VERSION="1.3.1"
 BACKUP_CRON="/etc/cron.d/backup_tasks"
 CONFIG_FILE="/etc/backup.conf"
 OPTIMIZE_CONFIG_FILE="/etc/optimize.conf"
@@ -28,11 +28,19 @@ LIBS=("lib_utils.sh" "lib_config.sh" "lib_traffic_config.sh" "lib_install.sh" "l
 for lib in "${LIBS[@]}"; do
     if [ -f "$SCRIPT_DIR/$lib" ]; then
         source "$SCRIPT_DIR/$lib"
+        echo "已加载: $lib" # 添加调试信息
     else
         echo "错误: 库文件 $SCRIPT_DIR/$lib 未找到!"
         exit 1
     fi
 done
+# 验证 toolbox_menu 是否加载
+if declare -f toolbox_menu >/dev/null; then
+    echo "toolbox_menu 函数已定义"
+else
+    echo "错误: toolbox_menu 函数未定义"
+    exit 1
+fi
 
 # --- Initial Checks ---
 if [ "$(id -u)" -ne 0 ]; then echo -e "\033[31m✗ 请使用 root 权限运行\033[0m"; exit 1; fi
